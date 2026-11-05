@@ -8,7 +8,7 @@ export const PORT = Number(process.env.PORT) || 3000;
 export const AUTHHUB_URL = (process.env.AUTHHUB_URL || "https://auth.josapratama.com").replace(/\/$/, "");
 export const AUTHHUB_CLIENT_ID = process.env.AUTHHUB_CLIENT_ID || "ah_client_notifybridge_4e5f6a";
 export const AUTHHUB_CLIENT_SECRET = process.env.AUTHHUB_CLIENT_SECRET || "ah_secret_notifybridge_9f8e7d6c5b4a3f2e1d0c9b";
-export const AUTHHUB_REDIRECT_URI = process.env.AUTHHUB_REDIRECT_URI || "http://localhost:4200/auth/callback";
+export const AUTHHUB_REDIRECT_URI = process.env.AUTHHUB_REDIRECT_URI || "";
 
 // Channels Default Configuration
 export const WABRIDGE_URL = (process.env.WABRIDGE_URL || "http://localhost:8080").replace(/\/$/, "");

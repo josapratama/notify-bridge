@@ -59,17 +59,18 @@ app.get("/api/health", (_req: Request, res: Response) => {
 
 // ─── AuthHub SSO ─────────────────────────────────────────────
 app.get("/api/auth/config", (req: Request, res: Response) => {
-  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-  const host = req.get("host") || `localhost:${PORT}`;
+  const protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+  const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || `localhost:${PORT}`;
   const dynamicRedirect = `${protocol}://${host}/auth/callback`;
+  const resolvedRedirect = AUTHHUB_REDIRECT_URI || dynamicRedirect;
 
   res.json({
     authHubUrl: AUTHHUB_URL,
     clientId: AUTHHUB_CLIENT_ID,
     clientSlug: "notify-bridge",
-    redirectUri: AUTHHUB_REDIRECT_URI || dynamicRedirect,
+    redirectUri: resolvedRedirect,
     ssoLoginUrl: `${AUTHHUB_URL}/oauth/authorize?client_id=${AUTHHUB_CLIENT_ID}&client_slug=notify-bridge&redirect_uri=${encodeURIComponent(
-      AUTHHUB_REDIRECT_URI || dynamicRedirect
+      resolvedRedirect
     )}&response_type=code&state=sso_notifybridge`,
   });
 });
@@ -80,8 +81,12 @@ app.post("/api/auth/callback", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Parameter 'code' otorisasi wajib disertakan." });
   }
 
+  const protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+  const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || `localhost:${PORT}`;
+  const fallbackRedirect = `${protocol}://${host}/auth/callback`;
+
   try {
-    const result = await exchangeOAuthCode(code, redirectUri);
+    const result = await exchangeOAuthCode(code, redirectUri || AUTHHUB_REDIRECT_URI || fallbackRedirect);
     res.json(result);
   } catch (err: any) {
     res.status(401).json({ error: err.message || "Gagal otorisasi dengan AuthHub." });
