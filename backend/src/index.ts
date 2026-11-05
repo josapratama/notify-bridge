@@ -66,8 +66,9 @@ app.get("/api/auth/config", (req: Request, res: Response) => {
   res.json({
     authHubUrl: AUTHHUB_URL,
     clientId: AUTHHUB_CLIENT_ID,
+    clientSlug: "notify-bridge",
     redirectUri: AUTHHUB_REDIRECT_URI || dynamicRedirect,
-    ssoLoginUrl: `${AUTHHUB_URL}/oauth/authorize?client_id=${AUTHHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(
+    ssoLoginUrl: `${AUTHHUB_URL}/oauth/authorize?client_id=${AUTHHUB_CLIENT_ID}&client_slug=notify-bridge&redirect_uri=${encodeURIComponent(
       AUTHHUB_REDIRECT_URI || dynamicRedirect
     )}&response_type=code&state=sso_notifybridge`,
   });
