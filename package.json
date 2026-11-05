@@ -1,0 +1,14 @@
+{
+  "name": "notify-bridge-workspace",
+  "version": "1.0.0",
+  "description": "Universal Multi-Channel Notification Gateway & Hub (WhatsApp, Email, Telegram, Discord, Push)",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm start",
+    "build": "cd frontend && npm run build && cd ../backend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "keywords": ["notification", "gateway", "hub", "whatsapp", "email", "telegram", "discord"],
+  "author": "Josa Pratama",
+  "license": "MIT"
+}

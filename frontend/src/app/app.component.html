@@ -1,0 +1,532 @@
+<div class="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+  <!-- Ambient Background Glows -->
+  <div class="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-indigo-600/15 blur-[140px] pointer-events-none"></div>
+  <div class="fixed top-1/3 -right-40 w-96 h-96 rounded-full bg-violet-600/15 blur-[140px] pointer-events-none"></div>
+
+  <!-- Toast Notification -->
+  <div
+    *ngIf="toast"
+    class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border text-sm backdrop-blur-xl transition-all"
+    [ngClass]="{
+      'bg-emerald-950/90 border-emerald-500/40 text-emerald-200': toast.type === 'success',
+      'bg-rose-950/90 border-rose-500/40 text-rose-200': toast.type === 'error',
+      'bg-indigo-950/90 border-indigo-500/40 text-indigo-200': toast.type === 'info'
+    }"
+  >
+    <span>{{ toast.type === 'success' ? '✅' : toast.type === 'error' ? '⚠️' : 'ℹ️' }}</span>
+    <span class="font-medium">{{ toast.text }}</span>
+    <button (click)="toast = null" class="text-xs opacity-60 hover:opacity-100 ml-2">✕</button>
+  </div>
+
+  <!-- Top Navigation Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-800/80 bg-[#0b0f19]/85 backdrop-blur-xl px-4 sm:px-8 py-3 flex items-center justify-between gap-4">
+    <!-- Brand -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 shrink-0">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg font-extrabold tracking-tight text-white">Notify<span class="text-indigo-400">Bridge</span></h1>
+          <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            Universal Hub
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 hidden sm:block">Central Multi-Channel Notification Gateway</p>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-2xl border border-slate-800 text-xs font-semibold">
+      <button
+        (click)="activeTab = 'sandbox'"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'sandbox' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        ⚡ Live Sandbox
+      </button>
+      <button
+        (click)="activeTab = 'logs'"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'logs' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        📊 Delivery Logs
+      </button>
+      <button
+        (click)="activeTab = 'templates'"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'templates' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        📝 Templates
+      </button>
+      <button
+        (click)="activeTab = 'channels'"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        ⚙️ Saluran
+      </button>
+      <button
+        (click)="activeTab = 'keys'"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'keys' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        🔑 API Keys
+      </button>
+    </nav>
+
+    <!-- User Profile & SSO Button -->
+    <div class="flex items-center gap-3">
+      <div *ngIf="currentUser" class="flex items-center gap-2">
+        <span
+          class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase border"
+          [ngClass]="currentUser.appRole === 'admin' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'"
+        >
+          {{ currentUser.appRole || 'Admin' }}
+        </span>
+        <span class="text-xs font-semibold text-slate-200 hidden sm:inline">{{ currentUser.name || currentUser.username }}</span>
+        <button (click)="logout()" class="p-1.5 text-slate-400 hover:text-rose-400 transition-colors" title="Logout">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
+      </div>
+
+      <button
+        *ngIf="!currentUser"
+        (click)="loginWithAuthHub()"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-indigo-500/40 text-xs font-bold text-indigo-300 transition-all"
+      >
+        <svg class="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+        <span>Masuk SSO</span>
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="FIDO2 / YubiKey PIN Ready"></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Mobile Tab Switcher -->
+  <div class="flex md:hidden items-center gap-1 p-2 bg-slate-900 border-b border-slate-800 overflow-x-auto text-xs font-semibold">
+    <button (click)="activeTab = 'sandbox'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'sandbox' ? 'bg-indigo-600 text-white' : 'text-slate-400'">⚡ Sandbox</button>
+    <button (click)="activeTab = 'logs'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'logs' ? 'bg-indigo-600 text-white' : 'text-slate-400'">📊 Logs</button>
+    <button (click)="activeTab = 'templates'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'templates' ? 'bg-indigo-600 text-white' : 'text-slate-400'">📝 Templates</button>
+    <button (click)="activeTab = 'channels'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white' : 'text-slate-400'">⚙️ Saluran</button>
+    <button (click)="activeTab = 'keys'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'keys' ? 'bg-indigo-600 text-white' : 'text-slate-400'">🔑 Keys</button>
+  </div>
+
+  <!-- Main Content Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+    <!-- ─── TAB 1: LIVE TEST SANDBOX ─── -->
+    <div *ngIf="activeTab === 'sandbox'" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Send Form -->
+      <div class="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-3xl p-6 sm:p-7 backdrop-blur-xl shadow-xl space-y-5">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span>⚡ Uji Coba Pengiriman Notifikasi</span>
+          </h2>
+          <p class="text-xs text-slate-400">Kirim notifikasi langsung ke berbagai saluran untuk menguji konfigurasi.</p>
+        </div>
+
+        <!-- Channel Select Buttons -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-2">Pilih Saluran Utama</label>
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'whatsapp'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'whatsapp' ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-md shadow-emerald-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">📱</span>
+              <span>WhatsApp</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'email'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'email' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 shadow-md shadow-indigo-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">✉️</span>
+              <span>Email</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'telegram'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'telegram' ? 'bg-sky-600/20 border-sky-500 text-sky-400 shadow-md shadow-sky-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">🤖</span>
+              <span>Telegram</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'discord'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'discord' ? 'bg-violet-600/20 border-violet-500 text-violet-400 shadow-md shadow-violet-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">👾</span>
+              <span>Discord</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'webpush'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'webpush' ? 'bg-amber-600/20 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">🔔</span>
+              <span>Push</span>
+            </button>
+
+            <button
+              type="button"
+              (click)="sandboxForm.channel = 'webhook'"
+              class="p-2.5 rounded-2xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all"
+              [ngClass]="sandboxForm.channel === 'webhook' ? 'bg-rose-600/20 border-rose-500 text-rose-400 shadow-md shadow-rose-500/10' : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white'"
+            >
+              <span class="text-lg">🌐</span>
+              <span>Webhook</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Recipient Input -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">
+            Target Tujuan (Penerima)
+            <span class="text-slate-400 font-normal">
+              {{ sandboxForm.channel === 'whatsapp' ? '(e.g. 08123456789 atau 628123456789)' : sandboxForm.channel === 'email' ? '(e.g. nama@gmail.com)' : sandboxForm.channel === 'telegram' ? '(Chat ID atau ID Channel Telegram)' : sandboxForm.channel === 'discord' ? '(Webhook URL Discord)' : '(Identifier)' }}
+            </span>
+          </label>
+          <input
+            type="text"
+            [(ngModel)]="sandboxForm.recipient"
+            placeholder="Masukkan nomor WA / email / Chat ID tujuan..."
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        <!-- Title / Subject -->
+        <div *ngIf="sandboxForm.channel === 'email' || sandboxForm.channel === 'discord' || sandboxForm.channel === 'webpush'">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Judul / Subjek Pesan</label>
+          <input
+            type="text"
+            [(ngModel)]="sandboxForm.title"
+            placeholder="e.g. [NotifyBridge] Verifikasi Akun Baru"
+            class="w-full px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        <!-- Message Body -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Isi Pesan Notifikasi</label>
+          <textarea
+            [(ngModel)]="sandboxForm.message"
+            rows="4"
+            placeholder="Ketik pesan..."
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
+          ></textarea>
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          (click)="sendTestNotification()"
+          [disabled]="isSending"
+          class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2"
+        >
+          <span *ngIf="isSending" class="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+          <span>{{ isSending ? 'Mengirim Notifikasi...' : 'Kirim Pesan Sekarang 🚀' }}</span>
+        </button>
+      </div>
+
+      <!-- Live Code / API Snippet Preview -->
+      <div class="lg:col-span-5 space-y-6">
+        <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">cURL API Request Snippet</h3>
+            <button (click)="copyToClipboard('curl -X POST http://localhost:4200/api/v1/send ...')" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold">Copy</button>
+          </div>
+
+          <pre class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto leading-relaxed"><code>curl -X POST http://localhost:4200/api/v1/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '&#123;
+    "channel": "{{ sandboxForm.channel }}",
+    "recipient": "{{ sandboxForm.recipient || '+62812...' }}",
+    "message": "{{ sandboxForm.message.slice(0, 40) }}..."
+  &#125;'</code></pre>
+
+          <p class="text-[11px] text-slate-400">
+            Aplikasi lain seperti <strong>GuidePath</strong>, <strong>AuthHub</strong>, atau <strong>MiniHost</strong> cukup memanggil endpoint di atas untuk mengirim pesan ke saluran apa pun.
+          </p>
+        </div>
+
+        <!-- Result Box -->
+        <div *ngIf="lastSendResult" class="bg-slate-900/60 border rounded-3xl p-6 backdrop-blur-xl shadow-xl space-y-3" [ngClass]="lastSendResult.success ? 'border-emerald-500/40' : 'border-rose-500/40'">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold" [ngClass]="lastSendResult.success ? 'text-emerald-400' : 'text-rose-400'">
+              {{ lastSendResult.success ? '✅ Berhasil Dikirim' : '⚠️ Gagal Terkirim' }}
+            </span>
+            <span class="text-[11px] text-slate-400">{{ lastSendResult.results?.[0]?.latencyMs }} ms</span>
+          </div>
+          <pre class="p-3 rounded-xl bg-slate-950 text-[11px] font-mono text-slate-300 overflow-x-auto"><code>{{ lastSendResult | json }}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── TAB 2: DELIVERY LOGS ─── -->
+    <div *ngIf="activeTab === 'logs'" class="bg-slate-900/60 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-xl">
+      <div class="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-white">📊 Riwayat Pengiriman Notifikasi (Delivery Logs)</h2>
+          <p class="text-xs text-slate-400">Monitoring real-time status pengiriman, latensi, dan response code.</p>
+        </div>
+        <button (click)="loadLogs()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300">
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <th class="py-3 px-4">Waktu</th>
+              <th class="py-3 px-4">Saluran</th>
+              <th class="py-3 px-4">Penerima</th>
+              <th class="py-3 px-4">Pesan</th>
+              <th class="py-3 px-4">Status</th>
+              <th class="py-3 px-4">Latensi</th>
+              <th class="py-3 px-4">Pengirim</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60">
+            <tr *ngFor="let l of logs" class="hover:bg-slate-800/40 transition-colors">
+              <td class="py-3 px-4 text-slate-400 whitespace-nowrap">{{ l.createdAt | date:'short' }}</td>
+              <td class="py-3 px-4 font-bold uppercase text-indigo-400">{{ l.channel }}</td>
+              <td class="py-3 px-4 font-mono text-slate-300">{{ l.recipient }}</td>
+              <td class="py-3 px-4 text-slate-300 max-w-xs truncate">{{ l.body }}</td>
+              <td class="py-3 px-4">
+                <span
+                  class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase"
+                  [ngClass]="l.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                >
+                  {{ l.status }}
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-400">{{ l.latencyMs }}ms</td>
+              <td class="py-3 px-4 text-slate-400">{{ l.clientApp }}</td>
+            </tr>
+            <tr *ngIf="logs.length === 0">
+              <td colspan="7" class="py-12 text-center text-slate-500">Belum ada riwayat pengiriman notifikasi.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ─── TAB 3: TEMPLATES ─── -->
+    <div *ngIf="activeTab === 'templates'" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-white">📝 Pengelola Template Notifikasi</h2>
+          <p class="text-xs text-slate-400">Template dengan placeholder variabel dinamis seperti <code class="text-indigo-400">&#123;&zwj;&#123;name&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;otp&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;amount&#125;&zwj;&#125;</code>.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div *ngFor="let t of templates" class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl flex flex-col justify-between space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-lg">{{ t.slug }}</span>
+              <div class="flex gap-1">
+                <span *ngFor="let ch of t.channels" class="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">{{ ch }}</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-bold text-white">{{ t.name }}</h3>
+            <p *ngIf="t.titleTemplate" class="text-xs text-indigo-300 mt-1 font-semibold">{{ t.titleTemplate }}</p>
+            <pre class="mt-3 p-3 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] font-mono text-slate-300 whitespace-pre-wrap">{{ t.bodyTemplate }}</pre>
+          </div>
+          <button (click)="sandboxForm.templateSlug = t.slug; activeTab = 'sandbox'" class="w-full py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-bold transition-all">
+            Uji Coba di Sandbox →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── TAB 4: CHANNELS CONFIG ─── -->
+    <div *ngIf="activeTab === 'channels'" class="max-w-4xl mx-auto space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-white">⚙️ Konfigurasi Saluran & Provider</h2>
+          <p class="text-xs text-slate-400">Atur kredensial WABridge, SMTP Nodemailer, Telegram Bot, dan Webhook Discord.</p>
+        </div>
+        <button (click)="saveSettings()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+          Simpan Konfigurasi
+        </button>
+      </div>
+
+      <!-- WhatsApp WABridge -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">📱</span>
+            <div>
+              <h3 class="text-sm font-bold text-white">WhatsApp Gateway (via WABridge)</h3>
+              <p class="text-xs text-slate-400">Terhubung ke project WABridge lokal atau server VPS.</p>
+            </div>
+          </div>
+          <input type="checkbox" [(ngModel)]="settings.whatsapp.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">WABridge API URL</label>
+            <input type="text" [(ngModel)]="settings.whatsapp.gatewayUrl" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">API Key / Token (Opsional)</label>
+            <input type="password" [(ngModel)]="settings.whatsapp.apiKey" placeholder="Bearer token..." class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Email SMTP -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">✉️</span>
+            <div>
+              <h3 class="text-sm font-bold text-white">Email SMTP (Nodemailer)</h3>
+              <p class="text-xs text-slate-400">Dukungan Gmail, Resend, Brevo, atau Mailgun.</p>
+            </div>
+          </div>
+          <input type="checkbox" [(ngModel)]="settings.email.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">SMTP Host</label>
+            <input type="text" [(ngModel)]="settings.email.host" placeholder="smtp.gmail.com" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Port</label>
+            <input type="number" [(ngModel)]="settings.email.port" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Pengirim (From)</label>
+            <input type="text" [(ngModel)]="settings.email.from" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">SMTP Username</label>
+            <input type="text" [(ngModel)]="settings.email.user" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">SMTP Password</label>
+            <input type="password" [(ngModel)]="settings.email.pass" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Telegram Bot -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🤖</span>
+            <div>
+              <h3 class="text-sm font-bold text-white">Telegram Bot API</h3>
+              <p class="text-xs text-slate-400">Kirim alert langsung ke grup atau chat pribadi.</p>
+            </div>
+          </div>
+          <input type="checkbox" [(ngModel)]="settings.telegram.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Bot Token</label>
+            <input type="password" [(ngModel)]="settings.telegram.botToken" placeholder="123456:ABC-DEF..." class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Default Chat ID</label>
+            <input type="text" [(ngModel)]="settings.telegram.defaultChatId" placeholder="-10012345678" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Discord Webhook -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">👾</span>
+            <div>
+              <h3 class="text-sm font-bold text-white">Discord Webhooks</h3>
+              <p class="text-xs text-slate-400">Kirim Rich Embed notifikasi ke channel Discord server Anda.</p>
+            </div>
+          </div>
+          <input type="checkbox" [(ngModel)]="settings.discord.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Discord Webhook URL</label>
+          <input type="password" [(ngModel)]="settings.discord.webhookUrl" placeholder="https://discord.com/api/webhooks/..." class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── TAB 5: API KEYS ─── -->
+    <div *ngIf="activeTab === 'keys'" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-white">🔑 Kunci Akses Layanan (API Keys)</h2>
+          <p class="text-xs text-slate-400">Kunci otentikasi yang digunakan oleh aplikasi klien ekosistem.</p>
+        </div>
+        <button (click)="showKeyModal = true" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+          + Buat API Key Baru
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div *ngFor="let k of apiKeys" class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-white">{{ k.name }}</span>
+            <span class="text-[10px] text-indigo-400 font-mono bg-indigo-500/10 px-2 py-0.5 rounded-full">{{ k.clientSlug }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="password" [value]="k.key" readonly class="w-full px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-950 font-mono text-xs text-slate-300" />
+            <button (click)="copyToClipboard(k.key)" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-indigo-300">Copy</button>
+          </div>
+          <div class="flex justify-end pt-2">
+            <button (click)="deleteApiKey(k.id)" class="text-xs text-rose-400 hover:text-rose-300 font-semibold">Hapus Key</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Create API Key Modal -->
+  <div *ngIf="showKeyModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" (click)="showKeyModal = false"></div>
+    <div class="relative bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl z-10 space-y-4">
+      <h3 class="text-base font-bold text-white">Buat API Key Baru</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Nama Layanan</label>
+          <input type="text" [(ngModel)]="newKeyForm.name" placeholder="e.g. Nexus Chat Production" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Client Slug</label>
+          <input type="text" [(ngModel)]="newKeyForm.clientSlug" placeholder="e.g. nexus-chat" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2">
+        <button (click)="showKeyModal = false" class="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold">Batal</button>
+        <button (click)="createApiKey()" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">Buat Key</button>
+      </div>
+    </div>
+  </div>
+</div>
