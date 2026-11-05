@@ -23,8 +23,25 @@ app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 app.use(authenticate);
 
-// Serve built Angular frontend if exists
-const FRONTEND_DIST = path.resolve(process.cwd(), "../frontend/dist/frontend/browser");
+// Dynamically resolve built Angular frontend path
+function getFrontendDistPath(): string {
+  const candidates = [
+    path.resolve(process.cwd(), "../frontend/dist/frontend/browser"),
+    path.resolve(process.cwd(), "frontend/dist/frontend/browser"),
+    path.resolve(process.cwd(), "dist/frontend/browser"),
+    path.resolve(__dirname, "../frontend/dist/frontend/browser"),
+    path.resolve(__dirname, "../../frontend/dist/frontend/browser"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      console.log(`📦 [NotifyBridge] Serving Angular frontend from: ${c}`);
+      return c;
+    }
+  }
+  return candidates[0];
+}
+
+const FRONTEND_DIST = getFrontendDistPath();
 if (fs.existsSync(FRONTEND_DIST)) {
   app.use(express.static(FRONTEND_DIST));
 }

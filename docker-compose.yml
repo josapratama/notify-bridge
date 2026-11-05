@@ -1,0 +1,13 @@
+services:
+  notify-bridge:
+    build: .
+    container_name: notify-bridge
+    restart: unless-stopped
+    ports:
+      - "4200:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - AUTHHUB_URL=https://auth.josapratama.com
+    volumes:
+      - ./data:/app/data

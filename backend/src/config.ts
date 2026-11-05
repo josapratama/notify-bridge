@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const PORT = Number(process.env.PORT) || 4200;
+export const PORT = Number(process.env.PORT) || 3000;
 
 // AuthHub SSO & OAuth2 Config
 export const AUTHHUB_URL = (process.env.AUTHHUB_URL || "https://auth.josapratama.com").replace(/\/$/, "");
