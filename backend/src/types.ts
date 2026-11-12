@@ -8,6 +8,13 @@ export interface AttachmentItem {
   contentType?: string;
 }
 
+export interface QuietHoursConfig {
+  enabled: boolean;
+  startHour: number; // e.g. 22 (22:00)
+  endHour: number;   // e.g. 7 (07:00)
+  timezoneOffset: number; // in hours, default 7 for WIB (UTC+7)
+}
+
 export interface ChannelSettings {
   whatsapp: {
     enabled: boolean;
@@ -38,6 +45,8 @@ export interface ChannelSettings {
     privateKey: string;
     subject: string;
   };
+  quietHours: QuietHoursConfig;
+  webhookSigningSecret: string;
 }
 
 export interface NotificationTemplate {
@@ -47,6 +56,7 @@ export interface NotificationTemplate {
   channels: ChannelType[];
   titleTemplate?: string;
   bodyTemplate: string;
+  translations?: Record<string, { titleTemplate?: string; bodyTemplate: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,6 +76,8 @@ export interface NotificationLog {
   attachmentsCount?: number;
   topic?: string;
   retryCount?: number;
+  idempotencyKey?: string;
+  priority?: "normal" | "high";
 }
 
 export interface ApiKeyItem {
@@ -116,6 +128,9 @@ export interface QueueItem {
   nextAttemptAt: number;
   status: "queued" | "processing" | "delivered" | "failed";
   lastError?: string;
+  idempotencyKey?: string;
+  priority?: "normal" | "high";
+  holdReason?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +144,13 @@ export interface ChannelHealthStatus {
   testedAt: string;
 }
 
+export interface IdempotencyRecord {
+  key: string;
+  response: any;
+  statusCode: number;
+  createdAt: number;
+}
+
 export interface NotifyBridgeStore {
   settings: ChannelSettings;
   templates: NotificationTemplate[];
@@ -137,4 +159,5 @@ export interface NotifyBridgeStore {
   pushSubscriptions: PushSubscriptionItem[];
   routes: TopicRoute[];
   queue: QueueItem[];
+  idempotencyCache: Record<string, IdempotencyRecord>;
 }

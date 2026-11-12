@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import {
   PORT,
   AUTHHUB_URL,
@@ -52,7 +53,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "NotifyBridge Multi-Channel Notification Hub",
-    version: "2.0.0",
+    version: "2.1.0",
     authHubUrl: AUTHHUB_URL,
     features: [
       "smart-queue",
@@ -60,9 +61,14 @@ app.get("/api/health", (_req: Request, res: Response) => {
       "topic-routing",
       "media-attachments",
       "scheduled-delivery",
+      "quiet-hours-dnd",
+      "idempotency-keys",
+      "batch-broadcast",
+      "i18n-templates",
       "health-checker",
-      "delivery-webhooks",
+      "hmac-webhook-signatures",
       "analytics-engine",
+      "log-csv-export",
     ],
     timestamp: new Date().toISOString(),
   });
@@ -117,8 +123,49 @@ app.get("/api/auth/me", (req: Request, res: Response) => {
   });
 });
 
-// ─── 🚀 Universal Send API (v2) ──────────────────────────────
+// Helper for template interpolation with multi-language
+function resolveTemplateContent(
+  templateSlug: string,
+  data: Record<string, any> = {},
+  lang?: string
+): { title: string; message: string } | null {
+  const tpl = db.getTemplateBySlug(templateSlug);
+  if (!tpl) return null;
+
+  let title = tpl.titleTemplate || "";
+  let message = tpl.bodyTemplate;
+
+  if (lang && tpl.translations && tpl.translations[lang]) {
+    const tr = tpl.translations[lang];
+    if (tr.titleTemplate) title = tr.titleTemplate;
+    if (tr.bodyTemplate) message = tr.bodyTemplate;
+  }
+
+  for (const [key, val] of Object.entries(data)) {
+    const reg = new RegExp(`{{\\s*${key}\\s*}}`, "g");
+    title = title.replace(reg, String(val));
+    message = message.replace(reg, String(val));
+  }
+
+  return { title, message };
+}
+
+// ─── 🚀 Universal Send API (v2.1) ────────────────────────────
 app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Response) => {
+  const idempotencyKey = (req.headers["x-idempotency-key"] as string) || req.body.idempotencyKey;
+
+  // 1. Check Idempotency Cache
+  if (idempotencyKey) {
+    const cached = db.getIdempotentResponse(idempotencyKey);
+    if (cached) {
+      return res
+        .status(cached.statusCode)
+        .set("X-Cache", "HIT")
+        .set("X-Idempotency-Key", idempotencyKey)
+        .json({ idempotent: true, ...cached.response });
+    }
+  }
+
   const {
     channel,
     channels,
@@ -127,6 +174,7 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     title,
     message,
     template,
+    lang,
     data = {},
     fallbackChannels = [],
     topic,
@@ -135,6 +183,7 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     delaySeconds,
     queue: forceQueue = false,
     callbackUrl,
+    priority = "normal",
   } = req.body;
 
   let finalTitle = title || "";
@@ -142,7 +191,7 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
   let targetChannels: ChannelType[] = channels || (channel ? [channel] : []);
   let targetRecipients: string[] = recipients || (recipient ? [recipient] : []);
 
-  // 1. Topic-Based Smart Routing
+  // 2. Topic-Based Smart Routing
   if (topic) {
     const route = db.getRouteByTopic(topic);
     if (route) {
@@ -163,21 +212,14 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     targetChannels = ["whatsapp"];
   }
 
-  // 2. Process Template if specified
+  // 3. Process Template if specified (with i18n support)
   if (template) {
-    const tpl = db.getTemplateBySlug(template);
-    if (!tpl) {
+    const resolved = resolveTemplateContent(template, data, lang);
+    if (!resolved) {
       return res.status(404).json({ error: `Template '${template}' tidak ditemukan.` });
     }
-    finalTitle = tpl.titleTemplate || finalTitle;
-    finalMessage = tpl.bodyTemplate;
-
-    // Replace placeholders e.g. {{name}}, {{otp}}
-    for (const [key, val] of Object.entries(data)) {
-      const reg = new RegExp(`{{\\s*${key}\\s*}}`, "g");
-      finalTitle = finalTitle.replace(reg, String(val));
-      finalMessage = finalMessage.replace(reg, String(val));
-    }
+    finalTitle = resolved.title || finalTitle;
+    finalMessage = resolved.message;
   }
 
   if (!finalMessage) {
@@ -190,9 +232,17 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
 
   const clientIdentifier = req.apiKeyClient || req.user?.username || "API Client";
 
-  // 3. Scheduled / Delayed / Queued Processing
+  // 4. Quiet Hours & Scheduled / Delayed / Queued Processing
+  const settings = db.getSettings();
+  const inQuietHours =
+    priority !== "high" &&
+    topic !== "security" &&
+    settings.quietHours?.enabled &&
+    queueRunner.isCurrentTimeInQuietHours(settings.quietHours);
+
   const isScheduled =
     forceQueue ||
+    inQuietHours ||
     !!sendAt ||
     (typeof delaySeconds === "number" && delaySeconds > 0);
 
@@ -211,27 +261,39 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
           callbackUrl,
           sendAt,
           delaySeconds,
+          idempotencyKey,
+          priority,
         });
         queuedItems.push(item);
       }
     }
 
-    return res.status(202).json({
+    const queuedResponse = {
       success: true,
       queued: true,
       queuedCount: queuedItems.length,
+      quietHoursHold: inQuietHours,
       items: queuedItems.map((q) => ({
         id: q.id,
         channel: q.channel,
         recipient: q.recipient,
         scheduledFor: new Date(q.scheduledFor).toISOString(),
+        holdReason: q.holdReason,
         status: q.status,
       })),
-      note: "Notifikasi berhasil masuk ke antrean dan akan dikirim secara asynchronous.",
-    });
+      note: inQuietHours
+        ? "Notifikasi ditahan di antrean karena jam tenang (Quiet Hours DND) aktif dan akan dikirim besok pagi."
+        : "Notifikasi berhasil masuk ke antrean dan akan dikirim secara asynchronous.",
+    };
+
+    if (idempotencyKey) {
+      db.saveIdempotentResponse(idempotencyKey, queuedResponse, 202);
+    }
+
+    return res.status(202).json(queuedResponse);
   }
 
-  // 4. Synchronous Direct Dispatch
+  // 5. Synchronous Direct Dispatch
   const results = [];
 
   for (const ch of targetChannels) {
@@ -265,22 +327,33 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
         }
       }
 
-      // Fire callback if immediate dispatch requested callback
+      // Fire callback with HMAC-SHA256 signature if immediate dispatch requested callback
       if (callbackUrl && callbackUrl.startsWith("http")) {
         try {
+          const secret = settings.webhookSigningSecret || "nb_default_secret";
+          const timestamp = new Date().toISOString();
+          const cbPayload = {
+            event: "notification.status",
+            status: dispatchRes.success ? "delivered" : "failed",
+            channel: ch,
+            recipient: r,
+            topic,
+            idempotencyKey: idempotencyKey || null,
+            latencyMs: dispatchRes.latencyMs,
+            error: dispatchRes.error || null,
+            timestamp,
+          };
+          const payloadStr = JSON.stringify(cbPayload);
+          const sig = crypto.createHmac("sha256", secret).update(payloadStr).digest("hex");
+
           fetch(callbackUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              event: "notification.status",
-              status: dispatchRes.success ? "delivered" : "failed",
-              channel: ch,
-              recipient: r,
-              topic,
-              latencyMs: dispatchRes.latencyMs,
-              error: dispatchRes.error || null,
-              timestamp: new Date().toISOString(),
-            }),
+            headers: {
+              "Content-Type": "application/json",
+              "X-NotifyBridge-Signature": `sha256=${sig}`,
+              "X-NotifyBridge-Timestamp": timestamp,
+            },
+            body: payloadStr,
           }).catch(() => {});
         } catch {}
       }
@@ -290,11 +363,80 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
   }
 
   const allSuccess = results.every((r) => r.success);
-  res.status(allSuccess ? 200 : 207).json({
+  const finalStatusCode = allSuccess ? 200 : 207;
+  const directResponse = {
     success: allSuccess,
     deliveredCount: results.filter((r) => r.success).length,
     totalCount: results.length,
     results,
+  };
+
+  if (idempotencyKey) {
+    db.saveIdempotentResponse(idempotencyKey, directResponse, finalStatusCode);
+  }
+
+  res.status(finalStatusCode).json(directResponse);
+});
+
+// ─── 📢 Batch Broadcast API ─────────────────────────────────
+app.post("/api/v1/broadcast", requireAdminOrApiKey, async (req: Request, res: Response) => {
+  const {
+    template,
+    title,
+    message,
+    channel = "whatsapp",
+    channels,
+    topic,
+    recipients = [],
+    attachments = [],
+    priority = "normal",
+  } = req.body;
+
+  if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+    return res.status(400).json({ error: "Array 'recipients' wajib disertakan dan tidak boleh kosong." });
+  }
+
+  const clientIdentifier = req.apiKeyClient || req.user?.username || "Broadcast API";
+  const broadcastId = "bcast_" + crypto.randomBytes(6).toString("hex");
+  const queuedItems = [];
+
+  for (const item of recipients) {
+    const to = typeof item === "string" ? item : item.to;
+    const itemData = typeof item === "object" ? item.data || {} : {};
+    const itemLang = typeof item === "object" ? item.lang : undefined;
+    const targetChannel = (typeof item === "object" && item.channel) ? item.channel : channel;
+
+    let finalTitle = title || "";
+    let finalMsg = message || "";
+
+    if (template) {
+      const resolved = resolveTemplateContent(template, itemData, itemLang);
+      if (resolved) {
+        finalTitle = resolved.title;
+        finalMsg = resolved.message;
+      }
+    }
+
+    if (finalMsg && to) {
+      const q = queueRunner.enqueueItem({
+        channel: targetChannel,
+        recipient: to,
+        title: finalTitle,
+        message: finalMsg,
+        attachments: attachments as AttachmentItem[],
+        clientApp: `${clientIdentifier} [${broadcastId}]`,
+        topic,
+        priority,
+      });
+      queuedItems.push(q);
+    }
+  }
+
+  res.status(202).json({
+    success: true,
+    broadcastId,
+    totalQueued: queuedItems.length,
+    note: `Sebanyak ${queuedItems.length} pesan broadcast telah masuk antrean Smart Queue.`,
   });
 });
 
@@ -373,10 +515,27 @@ app.delete("/api/templates/:id", requireAdminOrApiKey, (req: Request, res: Respo
   res.json({ success: true });
 });
 
-// ─── Delivery Logs ───────────────────────────────────────────
+// ─── Delivery Logs & CSV Export ──────────────────────────────
 app.get("/api/logs", (req: Request, res: Response) => {
   const limit = Number(req.query.limit) || 100;
-  res.json({ logs: db.getLogs(limit) });
+  const search = req.query.search as string;
+  const channel = req.query.channel as string;
+  const status = req.query.status as string;
+
+  res.json({ logs: db.getLogs({ limit, search, channel, status }) });
+});
+
+app.get("/api/logs/export", requireAdminOrApiKey, (req: Request, res: Response) => {
+  const search = req.query.search as string;
+  const channel = req.query.channel as string;
+  const status = req.query.status as string;
+
+  const csv = db.exportLogsCsv({ search, channel, status });
+  const filename = `notifybridge-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(csv);
 });
 
 // ─── API Keys Manager ────────────────────────────────────────
@@ -399,7 +558,7 @@ app.delete("/api/keys/:id", requireAdminOrApiKey, (req: Request, res: Response) 
   res.json({ success: true });
 });
 
-// ─── Push Subscriptions ──────────────────────────────────────
+// ─── Push Subscriptions & Admin Device Registration ──────────
 app.post("/api/webpush/subscribe", (req: Request, res: Response) => {
   const { endpoint, keys, userTag } = req.body;
   if (!endpoint || !keys) {
@@ -417,7 +576,7 @@ if (fs.existsSync(FRONTEND_DIST)) {
 }
 
 app.listen(PORT, () => {
-  console.log(`🚀 [NotifyBridge] Hub running on http://localhost:${PORT}`);
+  console.log(`🚀 [NotifyBridge] Hub v2.1 running on http://localhost:${PORT}`);
   console.log(`🔐 [AuthHub] Protected with SSO (AuthHub URL: ${AUTHHUB_URL})`);
   // Start background queue & scheduler
   queueRunner.start();

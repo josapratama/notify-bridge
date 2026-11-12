@@ -11,12 +11,21 @@ export interface AttachmentItem {
   contentType?: string;
 }
 
+interface QuietHoursConfig {
+  enabled: boolean;
+  startHour: number;
+  endHour: number;
+  timezoneOffset: number;
+}
+
 interface ChannelSettings {
   whatsapp: { enabled: boolean; gatewayUrl: string; apiKey: string };
   email: { enabled: boolean; host: string; port: number; secure: boolean; user: string; pass: string; from: string };
   telegram: { enabled: boolean; botToken: string; defaultChatId?: string };
   discord: { enabled: boolean; webhookUrl: string };
   webpush: { enabled: boolean; publicKey: string; privateKey: string; subject: string };
+  quietHours: QuietHoursConfig;
+  webhookSigningSecret: string;
 }
 
 interface NotificationTemplate {
@@ -26,6 +35,7 @@ interface NotificationTemplate {
   channels: ChannelType[];
   titleTemplate?: string;
   bodyTemplate: string;
+  translations?: Record<string, { titleTemplate?: string; bodyTemplate: string }>;
 }
 
 interface NotificationLog {
@@ -42,6 +52,8 @@ interface NotificationLog {
   createdAt: string;
   attachmentsCount?: number;
   topic?: string;
+  idempotencyKey?: string;
+  priority?: 'normal' | 'high';
 }
 
 interface TopicRoute {
@@ -72,6 +84,8 @@ interface QueueItem {
   nextAttemptAt: number;
   status: 'queued' | 'processing' | 'delivered' | 'failed';
   lastError?: string;
+  holdReason?: string;
+  priority?: 'normal' | 'high';
   createdAt: string;
 }
 
@@ -133,6 +147,9 @@ export class AppComponent implements OnInit {
     sendAt: '',
     delaySeconds: 10,
     callbackUrl: '',
+    idempotencyKey: '',
+    priority: 'normal' as 'normal' | 'high',
+    lang: 'id' as 'id' | 'en',
     fallbackChannels: [] as ChannelType[],
     attachments: [] as AttachmentItem[],
     newAttUrl: '',
@@ -141,11 +158,18 @@ export class AppComponent implements OnInit {
   isSending = false;
   lastSendResult: any = null;
 
+  // Logs Filter & Search
+  logSearchQuery = '';
+  logChannelFilter = 'all';
+  logStatusFilter = 'all';
+  isExportingCsv = false;
+
   // Data
   logs: NotificationLog[] = [];
   templates: NotificationTemplate[] = [];
   routes: TopicRoute[] = [];
   queue: QueueItem[] = [];
+  availableChannels: ChannelType[] = ['whatsapp', 'email', 'telegram', 'discord', 'webpush', 'webhook'];
   settings: ChannelSettings = {
     whatsapp: { enabled: true, gatewayUrl: 'http://localhost:8080', apiKey: '' },
     email: {
@@ -160,9 +184,10 @@ export class AppComponent implements OnInit {
     telegram: { enabled: true, botToken: '', defaultChatId: '' },
     discord: { enabled: true, webhookUrl: '' },
     webpush: { enabled: true, publicKey: '', privateKey: '', subject: 'mailto:admin@josapratama.com' },
+    quietHours: { enabled: false, startHour: 22, endHour: 7, timezoneOffset: 7 },
+    webhookSigningSecret: '',
   };
   apiKeys: ApiKeyItem[] = [];
-  availableChannels: ChannelType[] = ['whatsapp', 'email', 'telegram', 'discord', 'webpush', 'webhook'];
 
   // Health checks
   channelHealth: Record<string, ChannelHealthStatus> = {};
@@ -172,9 +197,31 @@ export class AppComponent implements OnInit {
   // Analytics
   analytics: any = null;
 
+  // Broadcast Modal
+  showBroadcastModal = false;
+  broadcastForm = {
+    templateSlug: '',
+    channel: 'whatsapp' as ChannelType,
+    recipientsText: '081234567891\n081234567892\n081234567893',
+    message: 'Pengumuman penting pemeliharaan sistem malam ini pukul 23:00 WIB.',
+    priority: 'normal' as 'normal' | 'high',
+  };
+  isBroadcasting = false;
+
+  // Admin Web Push
+  isAdminPushSubscribed = false;
+
   // Template Form Modal
   showTplModal = false;
-  editingTemplate: any = { name: '', slug: '', channels: ['whatsapp'], titleTemplate: '', bodyTemplate: '' };
+  editingTemplate: any = {
+    name: '',
+    slug: '',
+    channels: ['whatsapp'],
+    titleTemplate: '',
+    bodyTemplate: '',
+    enTitleTemplate: '',
+    enBodyTemplate: '',
+  };
 
   // Topic Route Form Modal
   showRouteModal = false;
@@ -216,6 +263,7 @@ export class AppComponent implements OnInit {
     this.loadAnalytics();
     this.loadQueue();
     this.checkAllHealth();
+    this.checkAdminPushStatus();
   }
 
   showToastMsg(text: string, type: 'success' | 'error' | 'info' = 'info') {
@@ -307,11 +355,47 @@ export class AppComponent implements OnInit {
   // ─── Data Loaders ──────────────────────────────────────────
   async loadLogs() {
     try {
-      const res = await fetch('/api/logs?limit=50', { headers: this.getAuthHeaders() });
+      const queryParams = new URLSearchParams({
+        limit: '100',
+        search: this.logSearchQuery,
+        channel: this.logChannelFilter,
+        status: this.logStatusFilter,
+      });
+      const res = await fetch(`/api/logs?${queryParams.toString()}`, { headers: this.getAuthHeaders() });
       const data = await res.json();
       this.logs = data.logs || [];
     } catch (e) {
       console.error(e);
+    }
+  }
+
+  async exportLogsCsv() {
+    this.isExportingCsv = true;
+    try {
+      const queryParams = new URLSearchParams({
+        search: this.logSearchQuery,
+        channel: this.logChannelFilter,
+        status: this.logStatusFilter,
+      });
+      const res = await fetch(`/api/logs/export?${queryParams.toString()}`, {
+        headers: this.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `notifybridge-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        this.showToastMsg('File CSV riwayat pengiriman berhasil diunduh! 📥', 'success');
+      } else {
+        this.showToastMsg('Gagal mengunduh CSV logs.', 'error');
+      }
+    } catch (e: any) {
+      this.showToastMsg('Kesalahan export CSV: ' + e.message, 'error');
+    } finally {
+      this.isExportingCsv = false;
     }
   }
 
@@ -329,7 +413,13 @@ export class AppComponent implements OnInit {
     try {
       const res = await fetch('/api/settings', { headers: this.getAuthHeaders() });
       const data = await res.json();
-      if (data.settings) this.settings = data.settings;
+      if (data.settings) {
+        this.settings = {
+          ...this.settings,
+          ...data.settings,
+          quietHours: data.settings.quietHours || { enabled: false, startHour: 22, endHour: 7, timezoneOffset: 7 },
+        };
+      }
     } catch (e) {
       console.error(e);
     }
@@ -417,6 +507,48 @@ export class AppComponent implements OnInit {
     }
   }
 
+  // ─── Admin Web Push ────────────────────────────────────────
+  checkAdminPushStatus() {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      this.isAdminPushSubscribed = true;
+    }
+  }
+
+  async subscribeAdminPush() {
+    if (!('Notification' in window)) {
+      this.showToastMsg('Browser Anda tidak mendukung Web Push Notification.', 'error');
+      return;
+    }
+
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        this.showToastMsg('Izin notifikasi ditolak oleh browser.', 'error');
+        return;
+      }
+
+      // Register dummy endpoint or service worker subscription
+      const dummyEndpoint = `https://fcm.googleapis.com/fcm/send/admin_${Date.now()}`;
+      await fetch('/api/webpush/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: dummyEndpoint,
+          keys: {
+            p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QT9P045SG2De0GmSJ',
+            auth: 'tBHItJI5svbpez7KI4CCXg',
+          },
+          userTag: 'admin',
+        }),
+      });
+
+      this.isAdminPushSubscribed = true;
+      this.showToastMsg('🔔 Notifikasi Desktop Admin berhasil diaktifkan!', 'success');
+    } catch (e: any) {
+      this.showToastMsg('Gagal mengaktifkan push: ' + e.message, 'error');
+    }
+  }
+
   // ─── Sandbox Attachments ───────────────────────────────────
   addAttachment() {
     if (!this.sandboxForm.newAttUrl) return;
@@ -449,6 +581,10 @@ export class AppComponent implements OnInit {
     this.showToastMsg(`Topic '${route.name}' diterapkan ke sandbox!`, 'info');
   }
 
+  generateIdempotencyKey() {
+    this.sandboxForm.idempotencyKey = 'idem_' + Math.random().toString(36).substring(2, 10);
+  }
+
   // ─── Send Notification ──────────────────────────────────────
   async sendTestNotification() {
     if (!this.sandboxForm.recipient && !this.sandboxForm.topic) {
@@ -469,6 +605,9 @@ export class AppComponent implements OnInit {
         topic: this.sandboxForm.topic || undefined,
         attachments: this.sandboxForm.attachments.length > 0 ? this.sandboxForm.attachments : undefined,
         callbackUrl: this.sandboxForm.callbackUrl || undefined,
+        idempotencyKey: this.sandboxForm.idempotencyKey || undefined,
+        priority: this.sandboxForm.priority,
+        lang: this.sandboxForm.lang,
       };
 
       if (this.sandboxForm.sendMode === 'delayed') {
@@ -486,8 +625,15 @@ export class AppComponent implements OnInit {
       const data = await res.json();
       this.lastSendResult = data;
 
-      if (res.status === 202) {
-        this.showToastMsg(`Notifikasi dijadwalkan & masuk antrean smart queue! ⏳`, 'info');
+      if (data.idempotent) {
+        this.showToastMsg('⚡ Response IDEMPOTENT (Pesan tidak diduplikasi, mengembalikan cache!)', 'info');
+      } else if (res.status === 202) {
+        this.showToastMsg(
+          data.quietHoursHold
+            ? '🌙 Ditahan di antrean karena jam tenang DND aktif!'
+            : 'Notifikasi dijadwalkan & masuk antrean smart queue! ⏳',
+          'info'
+        );
         this.loadQueue();
         this.loadAnalytics();
       } else if (res.ok && data.success) {
@@ -501,6 +647,49 @@ export class AppComponent implements OnInit {
       this.showToastMsg('Kesalahan jaringan: ' + e.message, 'error');
     } finally {
       this.isSending = false;
+    }
+  }
+
+  // ─── Batch Broadcast API ────────────────────────────────────
+  async sendBatchBroadcast() {
+    const rawRecipients = this.broadcastForm.recipientsText
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r.length > 0);
+
+    if (rawRecipients.length === 0) {
+      this.showToastMsg('Harap masukkan minimal 1 nomor / target penerima.', 'error');
+      return;
+    }
+
+    this.isBroadcasting = true;
+
+    try {
+      const res = await fetch('/api/v1/broadcast', {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({
+          channel: this.broadcastForm.channel,
+          template: this.broadcastForm.templateSlug || undefined,
+          message: this.broadcastForm.message,
+          recipients: rawRecipients.map((r) => ({ to: r })),
+          priority: this.broadcastForm.priority,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        this.showBroadcastModal = false;
+        this.showToastMsg(`📢 Broadcast sukses! ${data.totalQueued} pesan masuk antrean Smart Queue.`, 'success');
+        this.loadQueue();
+        this.loadAnalytics();
+      } else {
+        this.showToastMsg(data.error || 'Gagal broadcast pesan', 'error');
+      }
+    } catch (e: any) {
+      this.showToastMsg('Kesalahan broadcast: ' + e.message, 'error');
+    } finally {
+      this.isBroadcasting = false;
     }
   }
 
@@ -555,7 +744,6 @@ export class AppComponent implements OnInit {
       return;
     }
 
-    // Parse recipients
     const defaultRecipients: Record<string, string> = {};
     if (this.editingRoute.defaultRecipientText) {
       const parts = this.editingRoute.defaultRecipientText.split(',');
@@ -645,7 +833,7 @@ export class AppComponent implements OnInit {
         body: JSON.stringify(this.settings),
       });
       if (res.ok) {
-        this.showToastMsg('Konfigurasi saluran berhasil disimpan!', 'success');
+        this.showToastMsg('Konfigurasi saluran & jam tenang DND berhasil disimpan!', 'success');
         this.checkAllHealth();
       } else {
         this.showToastMsg('Gagal menyimpan konfigurasi saluran.', 'error');

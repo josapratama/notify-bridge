@@ -1,6 +1,7 @@
+import crypto from "crypto";
 import { db } from "./db.js";
 import { dispatcher } from "./dispatcher.js";
-import type { QueueItem, ChannelType, AttachmentItem } from "./types.js";
+import type { QueueItem, ChannelType, AttachmentItem, QuietHoursConfig } from "./types.js";
 
 // Per-channel rate limits (minimum ms between dispatches to prevent rate-limit bans)
 const CHANNEL_MIN_INTERVAL_MS: Record<ChannelType, number> = {
@@ -23,7 +24,7 @@ export class QueueRunner {
   public start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    console.log("⚡ [NotifyBridge Queue] Smart Queue Worker & Scheduler started");
+    console.log("⚡ [NotifyBridge Queue] Smart Queue Worker, Scheduler & DND Watcher started");
     this.intervalTimer = setInterval(() => {
       this.tick().catch((err) => console.error("Error in queue runner tick:", err));
     }, 1000);
@@ -38,7 +39,44 @@ export class QueueRunner {
   }
 
   /**
-   * Enqueue a notification with optional scheduling or delay
+   * Helper to check if current time is within configured Quiet Hours
+   */
+  public isCurrentTimeInQuietHours(config: QuietHoursConfig): boolean {
+    if (!config.enabled) return false;
+    // Calculate current hour in target timezone offset
+    const nowUtc = Date.now();
+    const targetTime = new Date(nowUtc + config.timezoneOffset * 3600000);
+    const currentHour = targetTime.getUTCHours();
+
+    if (config.startHour > config.endHour) {
+      // Overnight span, e.g. 22:00 -> 07:00
+      return currentHour >= config.startHour || currentHour < config.endHour;
+    } else {
+      // Same day span, e.g. 13:00 -> 15:00
+      return currentHour >= config.startHour && currentHour < config.endHour;
+    }
+  }
+
+  /**
+   * Calculate timestamp for when Quiet Hours end (next morning)
+   */
+  public calculateQuietHoursReleaseTime(config: QuietHoursConfig): number {
+    const nowUtc = Date.now();
+    const targetTime = new Date(nowUtc + config.timezoneOffset * 3600000);
+    const releaseTime = new Date(targetTime);
+
+    // If currentHour >= startHour, release is tomorrow at endHour:01
+    if (targetTime.getUTCHours() >= config.startHour) {
+      releaseTime.setUTCDate(releaseTime.getUTCDate() + 1);
+    }
+    releaseTime.setUTCHours(config.endHour, 1, 0, 0);
+
+    // Convert back to local server epoch ms
+    return releaseTime.getTime() - config.timezoneOffset * 3600000;
+  }
+
+  /**
+   * Enqueue a notification with optional scheduling, delay, DND hold, or batch
    */
   public enqueueItem(params: {
     channel: ChannelType;
@@ -52,9 +90,15 @@ export class QueueRunner {
     sendAt?: string;
     delaySeconds?: number;
     maxAttempts?: number;
+    idempotencyKey?: string;
+    priority?: "normal" | "high";
   }): QueueItem {
     const now = Date.now();
     let scheduledFor = now;
+    let holdReason: string | undefined = undefined;
+
+    const settings = db.getSettings();
+    const isCritical = params.priority === "high" || params.topic === "security";
 
     if (params.sendAt) {
       const parsed = new Date(params.sendAt).getTime();
@@ -63,6 +107,10 @@ export class QueueRunner {
       }
     } else if (params.delaySeconds && params.delaySeconds > 0) {
       scheduledFor = now + params.delaySeconds * 1000;
+    } else if (!isCritical && settings.quietHours?.enabled && this.isCurrentTimeInQuietHours(settings.quietHours)) {
+      scheduledFor = this.calculateQuietHoursReleaseTime(settings.quietHours);
+      holdReason = "quiet-hours";
+      console.log(`🌙 [DND Quiet Hours] Holding notification for ${params.recipient} until ${new Date(scheduledFor).toISOString()}`);
     }
 
     return db.enqueue({
@@ -77,6 +125,9 @@ export class QueueRunner {
       maxAttempts: params.maxAttempts || 3,
       scheduledFor,
       nextAttemptAt: scheduledFor,
+      idempotencyKey: params.idempotencyKey,
+      priority: params.priority || "normal",
+      holdReason,
     });
   }
 
@@ -99,7 +150,6 @@ export class QueueRunner {
       const minInterval = CHANNEL_MIN_INTERVAL_MS[item.channel] || 100;
       const lastTime = this.lastDispatchTimes[item.channel] || 0;
       if (now - lastTime < minInterval) {
-        // Skip for now, will pick up on next tick
         continue;
       }
 
@@ -181,39 +231,74 @@ export class QueueRunner {
 
       // Fire callback webhook on terminal failure
       this.fireCallback(item, "failed", errorMessage);
+
+      // Alert admin subscribers via WebPush
+      this.notifyAdminFailure(item, errorMessage);
     }
   }
 
   /**
-   * Fire Delivery Callback Webhook
+   * Fire Delivery Callback Webhook with HMAC-SHA256 Signature
    */
   private async fireCallback(item: QueueItem, status: "delivered" | "failed", error?: string) {
     if (!item.callbackUrl || !item.callbackUrl.startsWith("http")) return;
 
     try {
+      const settings = db.getSettings();
+      const secret = settings.webhookSigningSecret || "nb_default_secret";
+      const timestamp = new Date().toISOString();
+
+      const payloadObj = {
+        event: "notification.status",
+        queueId: item.id,
+        idempotencyKey: item.idempotencyKey || null,
+        status,
+        channel: item.channel,
+        recipient: item.recipient,
+        topic: item.topic,
+        attempts: item.attempts + 1,
+        error: error || item.lastError || null,
+        timestamp,
+      };
+
+      const payloadStr = JSON.stringify(payloadObj);
+      const signature = crypto.createHmac("sha256", secret).update(payloadStr).digest("hex");
+
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 6000);
 
       await fetch(item.callbackUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "notification.status",
-          queueId: item.id,
-          status,
-          channel: item.channel,
-          recipient: item.recipient,
-          topic: item.topic,
-          attempts: item.attempts + 1,
-          error: error || item.lastError || null,
-          timestamp: new Date().toISOString(),
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-NotifyBridge-Signature": `sha256=${signature}`,
+          "X-NotifyBridge-Timestamp": timestamp,
+        },
+        body: payloadStr,
         signal: controller.signal,
       });
       clearTimeout(timeout);
     } catch (cbErr: any) {
       console.warn(`Failed to fire callback URL ${item.callbackUrl}:`, cbErr.message);
     }
+  }
+
+  /**
+   * Broadcast failure alert to connected admin desktop browsers
+   */
+  private async notifyAdminFailure(item: QueueItem, error: string) {
+    try {
+      const adminSubs = db.getPushSubscriptions("admin");
+      if (adminSubs.length > 0) {
+        await dispatcher.dispatch({
+          channel: "webpush",
+          recipient: "admin",
+          title: `⚠️ Kegagalan Pengiriman [${item.channel.toUpperCase()}]`,
+          message: `Pengiriman ke ${item.recipient} gagal setelah ${item.maxAttempts}x percobaan. Error: ${error}`,
+          clientApp: "Queue Watcher",
+        });
+      }
+    } catch {}
   }
 }
 

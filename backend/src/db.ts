@@ -10,7 +10,7 @@ import type {
   PushSubscriptionItem,
   TopicRoute,
   QueueItem,
-  ChannelType,
+  IdempotencyRecord,
 } from "./types.js";
 import {
   WABRIDGE_URL,
@@ -63,6 +63,13 @@ function getDefaultData(): NotifyBridgeStore {
         privateKey: VAPID_PRIVATE_KEY,
         subject: VAPID_SUBJECT,
       },
+      quietHours: {
+        enabled: false,
+        startHour: 22, // 22:00
+        endHour: 7,    // 07:00
+        timezoneOffset: 7, // UTC+7 WIB
+      },
+      webhookSigningSecret: "nb_sec_" + crypto.randomBytes(20).toString("hex"),
     },
     templates: [
       {
@@ -72,6 +79,12 @@ function getDefaultData(): NotifyBridgeStore {
         channels: ["whatsapp", "email", "telegram"],
         titleTemplate: "Kode Verifikasi {{appName}}",
         bodyTemplate: "Halo {{name}},\n\nKode verifikasi Anda adalah: *{{otp}}*\nKode ini berlaku selama {{validMinutes}} menit. Jangan berikan kepada siapa pun.",
+        translations: {
+          en: {
+            titleTemplate: "{{appName}} Verification Code",
+            bodyTemplate: "Hello {{name}},\n\nYour verification code is: *{{otp}}*\nThis code expires in {{validMinutes}} minutes. Do not share it with anyone.",
+          },
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -82,6 +95,12 @@ function getDefaultData(): NotifyBridgeStore {
         channels: ["telegram", "discord", "whatsapp"],
         titleTemplate: "🚨 ALERT: Layanan {{serviceName}} Down!",
         bodyTemplate: "🚨 *Peringatan Sistem*\n\nLayanan: *{{serviceName}}*\nStatus: *DOWN*\nWaktu: {{time}}\nDetail: {{details}}",
+        translations: {
+          en: {
+            titleTemplate: "🚨 ALERT: Service {{serviceName}} Down!",
+            bodyTemplate: "🚨 *System Incident Alert*\n\nService: *{{serviceName}}*\nStatus: *DOWN*\nTime: {{time}}\nDetails: {{details}}",
+          },
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -92,6 +111,12 @@ function getDefaultData(): NotifyBridgeStore {
         channels: ["whatsapp", "email"],
         titleTemplate: "Pembayaran Berhasil #{{invoiceNumber}}",
         bodyTemplate: "Terima kasih {{name}},\n\nPembayaran invoice *{{invoiceNumber}}* sebesar *{{amount}}* telah berhasil diverifikasi.\nLayanan Anda telah aktif.",
+        translations: {
+          en: {
+            titleTemplate: "Payment Succeeded #{{invoiceNumber}}",
+            bodyTemplate: "Thank you {{name}},\n\nYour payment for invoice *{{invoiceNumber}}* of *{{amount}}* has been verified successfully.\nYour service is now active.",
+          },
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -157,6 +182,7 @@ function getDefaultData(): NotifyBridgeStore {
       },
     ],
     queue: [],
+    idempotencyCache: {},
   };
 }
 
@@ -171,16 +197,23 @@ class NotifyDb {
       try {
         const raw = fs.readFileSync(DB_FILE, "utf-8");
         const parsed = JSON.parse(raw);
+        const defaults = getDefaultData();
         this.data = {
-          ...getDefaultData(),
+          ...defaults,
           ...parsed,
-          settings: { ...getDefaultData().settings, ...(parsed.settings || {}) },
-          templates: parsed.templates || getDefaultData().templates,
+          settings: {
+            ...defaults.settings,
+            ...(parsed.settings || {}),
+            quietHours: { ...defaults.settings.quietHours, ...(parsed.settings?.quietHours || {}) },
+            webhookSigningSecret: parsed.settings?.webhookSigningSecret || defaults.settings.webhookSigningSecret,
+          },
+          templates: parsed.templates || defaults.templates,
           logs: parsed.logs || [],
-          apiKeys: parsed.apiKeys || getDefaultData().apiKeys,
+          apiKeys: parsed.apiKeys || defaults.apiKeys,
           pushSubscriptions: parsed.pushSubscriptions || [],
-          routes: parsed.routes && parsed.routes.length > 0 ? parsed.routes : getDefaultData().routes,
+          routes: parsed.routes && parsed.routes.length > 0 ? parsed.routes : defaults.routes,
           queue: parsed.queue || [],
+          idempotencyCache: parsed.idempotencyCache || {},
         };
       } catch (err) {
         console.warn("Failed to parse existing DB file, reinitializing...", err);
@@ -242,6 +275,7 @@ class NotifyDb {
       channels: t.channels,
       titleTemplate: t.titleTemplate,
       bodyTemplate: t.bodyTemplate,
+      translations: t.translations,
       createdAt: now,
       updatedAt: now,
     };
@@ -260,8 +294,50 @@ class NotifyDb {
     return false;
   }
 
-  public getLogs(limit = 100): NotificationLog[] {
-    return this.data.logs.slice(-limit).reverse();
+  public getLogs(params?: { limit?: number; search?: string; channel?: string; status?: string }): NotificationLog[] {
+    let result = [...this.data.logs];
+
+    if (params?.channel && params.channel !== "all") {
+      result = result.filter((l) => l.channel === params.channel);
+    }
+    if (params?.status && params.status !== "all") {
+      result = result.filter((l) => l.status === params.status);
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      result = result.filter(
+        (l) =>
+          l.recipient.toLowerCase().includes(q) ||
+          l.body.toLowerCase().includes(q) ||
+          (l.subject && l.subject.toLowerCase().includes(q)) ||
+          (l.clientApp && l.clientApp.toLowerCase().includes(q))
+      );
+    }
+
+    const limit = params?.limit || 100;
+    return result.slice(-limit).reverse();
+  }
+
+  public exportLogsCsv(filter?: { search?: string; channel?: string; status?: string }): string {
+    const logs = this.getLogs({ limit: 1000, ...filter });
+    const header = ["ID", "CreatedAt", "Channel", "Recipient", "Subject", "Body", "Status", "LatencyMs", "ClientApp", "Topic"].join(",");
+    const rows = logs.map((l) => {
+      const cleanBody = (l.body || "").replace(/[\r\n]+/g, " ").replace(/"/g, '""');
+      const cleanSubj = (l.subject || "").replace(/"/g, '""');
+      return [
+        `"${l.id}"`,
+        `"${l.createdAt}"`,
+        `"${l.channel}"`,
+        `"${l.recipient}"`,
+        `"${cleanSubj}"`,
+        `"${cleanBody}"`,
+        `"${l.status}"`,
+        l.latencyMs || 0,
+        `"${l.clientApp || ""}"`,
+        `"${l.topic || ""}"`,
+      ].join(",");
+    });
+    return [header, ...rows].join("\n");
   }
 
   public addLog(log: Omit<NotificationLog, "id" | "createdAt">): NotificationLog {
@@ -271,9 +347,8 @@ class NotifyDb {
       ...log,
     };
     this.data.logs.push(item);
-    // Keep max 1000 logs to prevent memory bloat
-    if (this.data.logs.length > 1000) {
-      this.data.logs = this.data.logs.slice(-1000);
+    if (this.data.logs.length > 2000) {
+      this.data.logs = this.data.logs.slice(-2000);
     }
     this.save();
     return item;
@@ -324,7 +399,10 @@ class NotifyDb {
     return item;
   }
 
-  public getPushSubscriptions(): PushSubscriptionItem[] {
+  public getPushSubscriptions(tag?: string): PushSubscriptionItem[] {
+    if (tag) {
+      return this.data.pushSubscriptions.filter((s) => s.userTag === tag);
+    }
     return this.data.pushSubscriptions;
   }
 
@@ -438,6 +516,38 @@ class NotifyDb {
       this.save();
     }
     return before - this.data.queue.length;
+  }
+
+  // ─── Idempotency Cache ───────────────────────────────────────
+  public getIdempotentResponse(key: string): IdempotencyRecord | undefined {
+    if (!this.data.idempotencyCache) this.data.idempotencyCache = {};
+    const record = this.data.idempotencyCache[key];
+    if (record) {
+      // 24-hour expiration
+      if (Date.now() - record.createdAt < 86400000) {
+        return record;
+      } else {
+        delete this.data.idempotencyCache[key];
+        this.save();
+      }
+    }
+    return undefined;
+  }
+
+  public saveIdempotentResponse(key: string, response: any, statusCode = 200) {
+    if (!this.data.idempotencyCache) this.data.idempotencyCache = {};
+    this.data.idempotencyCache[key] = {
+      key,
+      response,
+      statusCode,
+      createdAt: Date.now(),
+    };
+    // Keep max 5000 keys
+    const keys = Object.keys(this.data.idempotencyCache);
+    if (keys.length > 5000) {
+      delete this.data.idempotencyCache[keys[0]];
+    }
+    this.save();
   }
 
   // ─── Analytics & Metrics ─────────────────────────────────────
