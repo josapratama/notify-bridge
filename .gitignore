@@ -3,9 +3,10 @@ node_modules/
 dist/
 .angular/
 
-# Environment files
+# Environment & Runtime data
 .env
-data/*.tmp*
+data/
+backend/data/
 
 # Logs
 npm-debug.log*

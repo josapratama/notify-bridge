@@ -8,6 +8,9 @@ import type {
   NotificationLog,
   ApiKeyItem,
   PushSubscriptionItem,
+  TopicRoute,
+  QueueItem,
+  ChannelType,
 } from "./types.js";
 import {
   WABRIDGE_URL,
@@ -118,6 +121,42 @@ function getDefaultData(): NotifyBridgeStore {
       },
     ],
     pushSubscriptions: [],
+    routes: [
+      {
+        id: "route_security",
+        topic: "security",
+        name: "Security & Authentication Alerts",
+        description: "Notifikasi login baru, reset password, dan suspicious activity ke Telegram & Discord",
+        channels: ["telegram", "discord"],
+        defaultRecipients: {},
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: "route_billing",
+        topic: "billing",
+        name: "Billing & Transactions",
+        description: "Notifikasi invoice baru, konfirmasi pembayaran, dan langganan ke WhatsApp & Email",
+        channels: ["whatsapp", "email"],
+        defaultRecipients: {},
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: "route_system_ops",
+        topic: "system-alert",
+        name: "DevOps & System Monitoring",
+        description: "Broadcast peringatan server crash atau kuota habis ke Discord & Telegram",
+        channels: ["discord", "telegram"],
+        defaultRecipients: {},
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ],
+    queue: [],
   };
 }
 
@@ -131,7 +170,18 @@ class NotifyDb {
     if (fs.existsSync(DB_FILE)) {
       try {
         const raw = fs.readFileSync(DB_FILE, "utf-8");
-        this.data = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        this.data = {
+          ...getDefaultData(),
+          ...parsed,
+          settings: { ...getDefaultData().settings, ...(parsed.settings || {}) },
+          templates: parsed.templates || getDefaultData().templates,
+          logs: parsed.logs || [],
+          apiKeys: parsed.apiKeys || getDefaultData().apiKeys,
+          pushSubscriptions: parsed.pushSubscriptions || [],
+          routes: parsed.routes && parsed.routes.length > 0 ? parsed.routes : getDefaultData().routes,
+          queue: parsed.queue || [],
+        };
       } catch (err) {
         console.warn("Failed to parse existing DB file, reinitializing...", err);
         this.data = getDefaultData();
@@ -276,6 +326,204 @@ class NotifyDb {
 
   public getPushSubscriptions(): PushSubscriptionItem[] {
     return this.data.pushSubscriptions;
+  }
+
+  // ─── Topic-Based Routing ─────────────────────────────────────
+  public getRoutes(): TopicRoute[] {
+    return this.data.routes || [];
+  }
+
+  public getRouteByTopic(topic: string): TopicRoute | undefined {
+    return (this.data.routes || []).find((r) => r.topic === topic && r.enabled);
+  }
+
+  public saveRoute(route: Omit<TopicRoute, "id" | "createdAt" | "updatedAt"> & { id?: string }): TopicRoute {
+    const now = new Date().toISOString();
+    if (!this.data.routes) this.data.routes = [];
+
+    if (route.id) {
+      const idx = this.data.routes.findIndex((r) => r.id === route.id);
+      if (idx !== -1) {
+        this.data.routes[idx] = {
+          ...this.data.routes[idx],
+          ...route,
+          updatedAt: now,
+        };
+        this.save();
+        return this.data.routes[idx];
+      }
+    }
+
+    const newRoute: TopicRoute = {
+      id: "route_" + crypto.randomBytes(6).toString("hex"),
+      topic: route.topic.trim().toLowerCase(),
+      name: route.name,
+      description: route.description || "",
+      channels: route.channels,
+      defaultRecipients: route.defaultRecipients || {},
+      enabled: route.enabled !== false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data.routes.push(newRoute);
+    this.save();
+    return newRoute;
+  }
+
+  public deleteRoute(id: string): boolean {
+    if (!this.data.routes) return false;
+    const before = this.data.routes.length;
+    this.data.routes = this.data.routes.filter((r) => r.id !== id);
+    if (this.data.routes.length !== before) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  // ─── Smart Queue & Scheduler ─────────────────────────────────
+  public getQueue(): QueueItem[] {
+    return this.data.queue || [];
+  }
+
+  public enqueue(item: Omit<QueueItem, "id" | "attempts" | "status" | "createdAt" | "updatedAt">): QueueItem {
+    if (!this.data.queue) this.data.queue = [];
+    const now = new Date().toISOString();
+    const queueItem: QueueItem = {
+      id: "q_" + crypto.randomBytes(8).toString("hex"),
+      ...item,
+      attempts: 0,
+      status: "queued",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.data.queue.push(queueItem);
+    this.save();
+    return queueItem;
+  }
+
+  public updateQueueItem(id: string, updates: Partial<QueueItem>): QueueItem | undefined {
+    if (!this.data.queue) return undefined;
+    const item = this.data.queue.find((q) => q.id === id);
+    if (item) {
+      Object.assign(item, updates, { updatedAt: new Date().toISOString() });
+      this.save();
+      return item;
+    }
+    return undefined;
+  }
+
+  public deleteQueueItem(id: string): boolean {
+    if (!this.data.queue) return false;
+    const before = this.data.queue.length;
+    this.data.queue = this.data.queue.filter((q) => q.id !== id);
+    if (this.data.queue.length !== before) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  public cleanupCompletedQueue(retentionMs = 86400000): number {
+    if (!this.data.queue) return 0;
+    const now = Date.now();
+    const before = this.data.queue.length;
+    this.data.queue = this.data.queue.filter((q) => {
+      if (q.status === "delivered" || q.status === "failed") {
+        return now - new Date(q.updatedAt).getTime() < retentionMs;
+      }
+      return true;
+    });
+    if (this.data.queue.length !== before) {
+      this.save();
+    }
+    return before - this.data.queue.length;
+  }
+
+  // ─── Analytics & Metrics ─────────────────────────────────────
+  public getAnalytics() {
+    const logs = this.data.logs || [];
+    const total = logs.length;
+    const delivered = logs.filter((l) => l.status === "delivered" || l.status === "sent").length;
+    const failed = logs.filter((l) => l.status === "failed").length;
+    const successRate = total > 0 ? Math.round((delivered / total) * 1000) / 10 : 100;
+
+    const channelStats: Record<string, { total: number; delivered: number; failed: number; avgLatencyMs: number; totalLatencyMs: number }> = {
+      whatsapp: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+      email: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+      telegram: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+      discord: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+      webpush: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+      webhook: { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 },
+    };
+
+    let totalLatency = 0;
+    for (const log of logs) {
+      const ch = log.channel || "whatsapp";
+      if (!channelStats[ch]) {
+        channelStats[ch] = { total: 0, delivered: 0, failed: 0, avgLatencyMs: 0, totalLatencyMs: 0 };
+      }
+      channelStats[ch].total++;
+      if (log.status === "delivered" || log.status === "sent") {
+        channelStats[ch].delivered++;
+      } else {
+        channelStats[ch].failed++;
+      }
+      const lat = log.latencyMs || 0;
+      channelStats[ch].totalLatencyMs += lat;
+      totalLatency += lat;
+    }
+
+    for (const ch of Object.keys(channelStats)) {
+      if (channelStats[ch].total > 0) {
+        channelStats[ch].avgLatencyMs = Math.round(channelStats[ch].totalLatencyMs / channelStats[ch].total);
+      }
+    }
+
+    const overallAvgLatency = total > 0 ? Math.round(totalLatency / total) : 0;
+
+    // Daily volume for the last 7 days
+    const dailyVolume: Record<string, { date: string; total: number; delivered: number; failed: number }> = {};
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 86400000);
+      const key = d.toISOString().slice(0, 10);
+      dailyVolume[key] = { date: key, total: 0, delivered: 0, failed: 0 };
+    }
+
+    for (const log of logs) {
+      const day = (log.createdAt || "").slice(0, 10);
+      if (dailyVolume[day]) {
+        dailyVolume[day].total++;
+        if (log.status === "delivered" || log.status === "sent") {
+          dailyVolume[day].delivered++;
+        } else {
+          dailyVolume[day].failed++;
+        }
+      }
+    }
+
+    const queue = this.data.queue || [];
+    const queueStats = {
+      total: queue.length,
+      pending: queue.filter((q) => q.status === "queued").length,
+      processing: queue.filter((q) => q.status === "processing").length,
+      failed: queue.filter((q) => q.status === "failed").length,
+      delivered: queue.filter((q) => q.status === "delivered").length,
+    };
+
+    return {
+      summary: {
+        totalDispatched: total,
+        delivered,
+        failed,
+        successRate,
+        overallAvgLatencyMs: overallAvgLatency,
+      },
+      channelStats,
+      dailyVolume: Object.values(dailyVolume),
+      queueStats,
+    };
   }
 }
 

@@ -32,10 +32,10 @@
         <div class="flex items-center gap-2">
           <h1 class="text-lg font-extrabold tracking-tight text-white">Notify<span class="text-indigo-400">Bridge</span></h1>
           <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-            Universal Hub
+            v2.0 Hub
           </span>
         </div>
-        <p class="text-[11px] text-slate-400 hidden sm:block">Central Multi-Channel Notification Gateway</p>
+        <p class="text-[11px] text-slate-400 hidden sm:block">Central Enterprise Notification Gateway & Scheduler</p>
       </div>
     </div>
 
@@ -49,11 +49,25 @@
         ⚡ Live Sandbox
       </button>
       <button
-        (click)="activeTab = 'logs'"
+        (click)="activeTab = 'logs'; loadAnalytics(); loadQueue()"
         class="px-3.5 py-1.5 rounded-xl transition-all"
         [ngClass]="activeTab === 'logs' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
       >
-        📊 Delivery Logs
+        📊 Logs & Analytics
+      </button>
+      <button
+        (click)="activeTab = 'routing'; loadRoutes()"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'routing' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        🔀 Smart Routing
+      </button>
+      <button
+        (click)="activeTab = 'channels'; checkAllHealth()"
+        class="px-3.5 py-1.5 rounded-xl transition-all"
+        [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+      >
+        ⚙️ Saluran & Health
       </button>
       <button
         (click)="activeTab = 'templates'"
@@ -61,13 +75,6 @@
         [ngClass]="activeTab === 'templates' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
       >
         📝 Templates
-      </button>
-      <button
-        (click)="activeTab = 'channels'"
-        class="px-3.5 py-1.5 rounded-xl transition-all"
-        [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
-      >
-        ⚙️ Saluran
       </button>
       <button
         (click)="activeTab = 'keys'"
@@ -106,7 +113,7 @@
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
         <span>Masuk SSO</span>
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="FIDO2 / YubiKey PIN Ready"></span>
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="FIDO2 / YubiKey Ready"></span>
       </button>
     </div>
   </header>
@@ -114,9 +121,10 @@
   <!-- Mobile Tab Switcher -->
   <div class="flex md:hidden items-center gap-1 p-2 bg-slate-900 border-b border-slate-800 overflow-x-auto text-xs font-semibold">
     <button (click)="activeTab = 'sandbox'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'sandbox' ? 'bg-indigo-600 text-white' : 'text-slate-400'">⚡ Sandbox</button>
-    <button (click)="activeTab = 'logs'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'logs' ? 'bg-indigo-600 text-white' : 'text-slate-400'">📊 Logs</button>
+    <button (click)="activeTab = 'logs'; loadAnalytics(); loadQueue()" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'logs' ? 'bg-indigo-600 text-white' : 'text-slate-400'">📊 Logs</button>
+    <button (click)="activeTab = 'routing'; loadRoutes()" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'routing' ? 'bg-indigo-600 text-white' : 'text-slate-400'">🔀 Routing</button>
+    <button (click)="activeTab = 'channels'; checkAllHealth()" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white' : 'text-slate-400'">⚙️ Saluran</button>
     <button (click)="activeTab = 'templates'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'templates' ? 'bg-indigo-600 text-white' : 'text-slate-400'">📝 Templates</button>
-    <button (click)="activeTab = 'channels'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'channels' ? 'bg-indigo-600 text-white' : 'text-slate-400'">⚙️ Saluran</button>
     <button (click)="activeTab = 'keys'" class="px-3 py-1.5 rounded-xl shrink-0" [ngClass]="activeTab === 'keys' ? 'bg-indigo-600 text-white' : 'text-slate-400'">🔑 Keys</button>
   </div>
 
@@ -131,7 +139,29 @@
           <h2 class="text-base font-bold text-white flex items-center gap-2">
             <span>⚡ Uji Coba Pengiriman Notifikasi</span>
           </h2>
-          <p class="text-xs text-slate-400">Kirim notifikasi langsung ke berbagai saluran untuk menguji konfigurasi.</p>
+          <p class="text-xs text-slate-400">Kirim notifikasi langsung, terjadwal, atau via Topic Routing dengan lampiran media.</p>
+        </div>
+
+        <!-- Topic Quick Selector Banner -->
+        <div *ngIf="routes.length > 0" class="bg-indigo-950/40 border border-indigo-500/20 rounded-2xl p-3 flex flex-wrap items-center gap-2">
+          <span class="text-[11px] font-bold text-indigo-300">🔀 Topic Routing:</span>
+          <button
+            *ngFor="let r of routes"
+            type="button"
+            (click)="applyTopic(r)"
+            class="px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all"
+            [ngClass]="sandboxForm.topic === r.topic ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm' : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:text-white'"
+          >
+            #{{ r.topic }}
+          </button>
+          <button
+            *ngIf="sandboxForm.topic"
+            type="button"
+            (click)="sandboxForm.topic = ''"
+            class="text-[11px] text-slate-400 hover:text-rose-400 font-semibold ml-auto"
+          >
+            Reset Topic
+          </button>
         </div>
 
         <!-- Channel Select Buttons -->
@@ -205,20 +235,20 @@
           <label class="block text-xs font-semibold text-slate-300 mb-1">
             Target Tujuan (Penerima)
             <span class="text-slate-400 font-normal">
-              {{ sandboxForm.channel === 'whatsapp' ? '(e.g. 08123456789 atau 628123456789)' : sandboxForm.channel === 'email' ? '(e.g. nama@gmail.com)' : sandboxForm.channel === 'telegram' ? '(Chat ID atau ID Channel Telegram)' : sandboxForm.channel === 'discord' ? '(Webhook URL Discord)' : '(Identifier)' }}
+              {{ sandboxForm.channel === 'whatsapp' ? '(e.g. 08123456789)' : sandboxForm.channel === 'email' ? '(e.g. nama&#64;gmail.com)' : sandboxForm.channel === 'telegram' ? '(Chat ID atau ID Channel Telegram)' : sandboxForm.channel === 'discord' ? '(Webhook URL Discord)' : '(Identifier)' }}
             </span>
           </label>
           <input
             type="text"
             [(ngModel)]="sandboxForm.recipient"
-            placeholder="Masukkan nomor WA / email / Chat ID tujuan..."
+            placeholder="Nomor WA / email / Chat ID tujuan (atau kosongkan jika pakai Topic)..."
             class="w-full px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
           />
         </div>
 
         <!-- Title / Subject -->
-        <div *ngIf="sandboxForm.channel === 'email' || sandboxForm.channel === 'discord' || sandboxForm.channel === 'webpush'">
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Judul / Subjek Pesan</label>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Judul / Subjek Pesan (Opsional)</label>
           <input
             type="text"
             [(ngModel)]="sandboxForm.title"
@@ -232,10 +262,110 @@
           <label class="block text-xs font-semibold text-slate-300 mb-1">Isi Pesan Notifikasi</label>
           <textarea
             [(ngModel)]="sandboxForm.message"
-            rows="4"
+            rows="3"
             placeholder="Ketik pesan..."
             class="w-full px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
           ></textarea>
+        </div>
+
+        <!-- Attachments & Media Support -->
+        <div class="border border-slate-800 rounded-2xl p-3 bg-slate-950/40 space-y-2">
+          <label class="block text-xs font-semibold text-slate-300">📎 Lampiran Media & Dokumen (Opsional)</label>
+          <div class="flex gap-2">
+            <input
+              type="text"
+              [(ngModel)]="sandboxForm.newAttUrl"
+              placeholder="https://example.com/invoice.pdf atau gambar.jpg"
+              class="flex-1 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white"
+            />
+            <input
+              type="text"
+              [(ngModel)]="sandboxForm.newAttFilename"
+              placeholder="invoice-101.pdf"
+              class="w-32 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white"
+            />
+            <button
+              type="button"
+              (click)="addAttachment()"
+              class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold"
+            >
+              + Tambah
+            </button>
+          </div>
+          <div *ngIf="sandboxForm.attachments.length > 0" class="flex flex-wrap gap-2 pt-1">
+            <span
+              *ngFor="let att of sandboxForm.attachments; let i = index"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-xs text-indigo-200"
+            >
+              📄 {{ att.filename }}
+              <button (click)="removeAttachment(i)" class="text-rose-400 hover:text-rose-200 ml-1">✕</button>
+            </span>
+          </div>
+        </div>
+
+        <!-- Delivery Mode: Now / Delayed / Scheduled -->
+        <div class="border border-slate-800 rounded-2xl p-3 bg-slate-950/40 space-y-2">
+          <label class="block text-xs font-semibold text-slate-300">⏱️ Mode Pengiriman & Penjadwalan</label>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              (click)="sandboxForm.sendMode = 'now'"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border"
+              [ngClass]="sandboxForm.sendMode === 'now' ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-700'"
+            >
+              🚀 Langsung (Real-time)
+            </button>
+            <button
+              type="button"
+              (click)="sandboxForm.sendMode = 'delayed'"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border"
+              [ngClass]="sandboxForm.sendMode === 'delayed' ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-700'"
+            >
+              ⏳ Tunda (Delay)
+            </button>
+            <button
+              type="button"
+              (click)="sandboxForm.sendMode = 'scheduled'"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border"
+              [ngClass]="sandboxForm.sendMode === 'scheduled' ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-700'"
+            >
+              📅 Jadwal Tertentu
+            </button>
+          </div>
+
+          <div *ngIf="sandboxForm.sendMode === 'delayed'" class="pt-2 flex items-center gap-2">
+            <span class="text-xs text-slate-400">Tunda pengiriman selama:</span>
+            <input
+              type="number"
+              [(ngModel)]="sandboxForm.delaySeconds"
+              min="1"
+              max="86400"
+              class="w-24 px-3 py-1 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white"
+            />
+            <span class="text-xs text-slate-400">detik via Smart Queue</span>
+          </div>
+
+          <div *ngIf="sandboxForm.sendMode === 'scheduled'" class="pt-2">
+            <input
+              type="datetime-local"
+              [(ngModel)]="sandboxForm.sendAt"
+              class="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-xs text-white"
+            />
+          </div>
+        </div>
+
+        <!-- Webhook Callback URL -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">
+            Callback Webhook URL (Opsional)
+            <span class="text-slate-400 font-normal">- Menerima event saat notifikasi terkirim/gagal</span>
+          </label>
+          <input
+            type="text"
+            [(ngModel)]="sandboxForm.callbackUrl"
+            placeholder="https://api.domain-anda.com/webhooks/notify-status"
+            class="w-full px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
+          />
         </div>
 
         <!-- Submit Button -->
@@ -245,7 +375,7 @@
           class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2"
         >
           <span *ngIf="isSending" class="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-          <span>{{ isSending ? 'Mengirim Notifikasi...' : 'Kirim Pesan Sekarang 🚀' }}</span>
+          <span>{{ isSending ? 'Memproses Pengiriman...' : sandboxForm.sendMode !== 'now' ? 'Jadwalkan ke Smart Queue ⏳' : 'Kirim Pesan Sekarang 🚀' }}</span>
         </button>
       </div>
 
@@ -254,20 +384,23 @@
         <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl space-y-4">
           <div class="flex items-center justify-between">
             <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">cURL API Request Snippet</h3>
-            <button (click)="copyToClipboard('curl -X POST http://localhost:4200/api/v1/send ...')" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold">Copy</button>
+            <button (click)="copyToClipboard('curl -X POST http://localhost:3000/api/v1/send ...')" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold">Copy</button>
           </div>
 
-          <pre class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto leading-relaxed"><code>curl -X POST http://localhost:4200/api/v1/send \
+          <pre class="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto leading-relaxed"><code>curl -X POST http://localhost:3000/api/v1/send \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_API_KEY" \
   -d '&#123;
-    "channel": "{{ sandboxForm.channel }}",
+    <span *ngIf="sandboxForm.topic">"topic": "{{ sandboxForm.topic }}",</span>
+    <span *ngIf="!sandboxForm.topic">"channel": "{{ sandboxForm.channel }}",</span>
     "recipient": "{{ sandboxForm.recipient || '+62812...' }}",
-    "message": "{{ sandboxForm.message.slice(0, 40) }}..."
+    "message": "{{ sandboxForm.message.slice(0, 35) }}..."<span *ngIf="sandboxForm.sendMode === 'delayed'">,
+    "delaySeconds": {{ sandboxForm.delaySeconds }}</span><span *ngIf="sandboxForm.callbackUrl">,
+    "callbackUrl": "{{ sandboxForm.callbackUrl }}"</span>
   &#125;'</code></pre>
 
           <p class="text-[11px] text-slate-400">
-            Aplikasi lain seperti <strong>GuidePath</strong>, <strong>AuthHub</strong>, atau <strong>MiniHost</strong> cukup memanggil endpoint di atas untuk mengirim pesan ke saluran apa pun.
+            Smart Gateway mendukung pengiriman multi-channel, otomatis auto-retry exponential backoff, rate limiting per-saluran, serta webhook delivery callbacks.
           </p>
         </div>
 
@@ -275,104 +408,208 @@
         <div *ngIf="lastSendResult" class="bg-slate-900/60 border rounded-3xl p-6 backdrop-blur-xl shadow-xl space-y-3" [ngClass]="lastSendResult.success ? 'border-emerald-500/40' : 'border-rose-500/40'">
           <div class="flex items-center justify-between">
             <span class="text-xs font-bold" [ngClass]="lastSendResult.success ? 'text-emerald-400' : 'text-rose-400'">
-              {{ lastSendResult.success ? '✅ Berhasil Dikirim' : '⚠️ Gagal Terkirim' }}
+              {{ lastSendResult.queued ? '⏳ Masuk Antrean Smart Queue' : lastSendResult.success ? '✅ Berhasil Dikirim' : '⚠️ Gagal Terkirim' }}
             </span>
-            <span class="text-[11px] text-slate-400">{{ lastSendResult.results?.[0]?.latencyMs }} ms</span>
+            <span class="text-[11px] text-slate-400">{{ lastSendResult.results?.[0]?.latencyMs || 0 }} ms</span>
           </div>
-          <pre class="p-3 rounded-xl bg-slate-950 text-[11px] font-mono text-slate-300 overflow-x-auto"><code>{{ lastSendResult | json }}</code></pre>
+          <pre class="p-3 rounded-xl bg-slate-950 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-60"><code>{{ lastSendResult | json }}</code></pre>
         </div>
       </div>
     </div>
 
-    <!-- ─── TAB 2: DELIVERY LOGS ─── -->
-    <div *ngIf="activeTab === 'logs'" class="bg-slate-900/60 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-xl">
-      <div class="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between">
-        <div>
-          <h2 class="text-base font-bold text-white">📊 Riwayat Pengiriman Notifikasi (Delivery Logs)</h2>
-          <p class="text-xs text-slate-400">Monitoring real-time status pengiriman, latensi, dan response code.</p>
+    <!-- ─── TAB 2: LOGS & ANALYTICS ─── -->
+    <div *ngIf="activeTab === 'logs'" class="space-y-6">
+      <!-- Analytics Overview Cards -->
+      <div *ngIf="analytics" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 backdrop-blur-xl">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Dispatched</span>
+          <div class="text-2xl font-extrabold text-white mt-2">{{ analytics.summary?.totalDispatched || 0 }}</div>
+          <div class="text-[11px] text-emerald-400 mt-1">✓ {{ analytics.summary?.delivered || 0 }} sukses &bull; {{ analytics.summary?.failed || 0 }} gagal</div>
         </div>
-        <button (click)="loadLogs()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300">
-          🔄 Refresh
-        </button>
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 backdrop-blur-xl">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Tingkat Keberhasilan</span>
+          <div class="text-2xl font-extrabold text-indigo-400 mt-2">{{ analytics.summary?.successRate || 100 }}%</div>
+          <div class="text-[11px] text-slate-400 mt-1">Delivery Success Rate</div>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 backdrop-blur-xl">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Rata-Rata Latensi</span>
+          <div class="text-2xl font-extrabold text-white mt-2">{{ analytics.summary?.overallAvgLatencyMs || 0 }} <span class="text-sm font-normal text-slate-400">ms</span></div>
+          <div class="text-[11px] text-slate-400 mt-1">Response time rata-rata</div>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 backdrop-blur-xl">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Smart Queue Aktif</span>
+          <div class="text-2xl font-extrabold text-amber-400 mt-2">{{ analytics.queueStats?.pending || 0 }}</div>
+          <div class="text-[11px] text-slate-400 mt-1">Pending &bull; {{ analytics.queueStats?.processing || 0 }} proses</div>
+        </div>
       </div>
 
-      <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr class="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <th class="py-3 px-4">Waktu</th>
-              <th class="py-3 px-4">Saluran</th>
-              <th class="py-3 px-4">Penerima</th>
-              <th class="py-3 px-4">Pesan</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4">Latensi</th>
-              <th class="py-3 px-4">Pengirim</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60">
-            <tr *ngFor="let l of logs" class="hover:bg-slate-800/40 transition-colors">
-              <td class="py-3 px-4 text-slate-400 whitespace-nowrap">{{ l.createdAt | date:'short' }}</td>
-              <td class="py-3 px-4 font-bold uppercase text-indigo-400">{{ l.channel }}</td>
-              <td class="py-3 px-4 font-mono text-slate-300">{{ l.recipient }}</td>
-              <td class="py-3 px-4 text-slate-300 max-w-xs truncate">{{ l.body }}</td>
-              <td class="py-3 px-4">
-                <span
-                  class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase"
-                  [ngClass]="l.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
-                >
-                  {{ l.status }}
-                </span>
-              </td>
-              <td class="py-3 px-4 text-slate-400">{{ l.latencyMs }}ms</td>
-              <td class="py-3 px-4 text-slate-400">{{ l.clientApp }}</td>
-            </tr>
-            <tr *ngIf="logs.length === 0">
-              <td colspan="7" class="py-12 text-center text-slate-500">Belum ada riwayat pengiriman notifikasi.</td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- Active Queue Table (If any) -->
+      <div *ngIf="queue.length > 0" class="bg-slate-900/60 border border-amber-500/30 rounded-3xl overflow-hidden backdrop-blur-xl">
+        <div class="p-4 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between">
+          <h3 class="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-2">
+            <span>⏳ Antrean Smart Queue & Scheduler ({{ queue.length }})</span>
+          </h3>
+          <button (click)="loadQueue()" class="text-xs text-amber-300 hover:underline">Refresh Queue</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-950/80 text-[11px] font-bold text-slate-400 border-b border-slate-800">
+                <th class="py-2.5 px-4">Saluran</th>
+                <th class="py-2.5 px-4">Penerima</th>
+                <th class="py-2.5 px-4">Percobaan</th>
+                <th class="py-2.5 px-4">Jadwal Kirim</th>
+                <th class="py-2.5 px-4">Status</th>
+                <th class="py-2.5 px-4 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60">
+              <tr *ngFor="let q of queue">
+                <td class="py-2.5 px-4 font-bold uppercase text-indigo-400">{{ q.channel }}</td>
+                <td class="py-2.5 px-4 font-mono text-slate-300">{{ q.recipient }}</td>
+                <td class="py-2.5 px-4 text-slate-300">{{ q.attempts }} / {{ q.maxAttempts }}</td>
+                <td class="py-2.5 px-4 text-slate-400">{{ q.scheduledFor | date:'short' }}</td>
+                <td class="py-2.5 px-4">
+                  <span
+                    class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+                    [ngClass]="q.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400' : q.status === 'processing' ? 'bg-indigo-500/10 text-indigo-400 animate-pulse' : q.status === 'failed' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'"
+                  >
+                    {{ q.status }}
+                  </span>
+                </td>
+                <td class="py-2.5 px-4 text-right">
+                  <button (click)="deleteQueueItem(q.id)" class="text-xs text-rose-400 hover:text-rose-300 font-semibold">Batal</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Delivery Logs Table -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-xl">
+        <div class="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-white">📊 Riwayat Pengiriman Notifikasi (Delivery Logs)</h2>
+            <p class="text-xs text-slate-400">Monitoring real-time status pengiriman, latensi, dan response code.</p>
+          </div>
+          <button (click)="loadLogs(); loadAnalytics()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300">
+            🔄 Refresh
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                <th class="py-3 px-4">Waktu</th>
+                <th class="py-3 px-4">Saluran</th>
+                <th class="py-3 px-4">Penerima</th>
+                <th class="py-3 px-4">Pesan & Media</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4">Latensi</th>
+                <th class="py-3 px-4">Pengirim</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60">
+              <tr *ngFor="let l of logs" class="hover:bg-slate-800/40 transition-colors">
+                <td class="py-3 px-4 text-slate-400 whitespace-nowrap">{{ l.createdAt | date:'short' }}</td>
+                <td class="py-3 px-4 font-bold uppercase text-indigo-400">
+                  {{ l.channel }}
+                  <span *ngIf="l.topic" class="block text-[10px] text-slate-400 font-normal">#{{ l.topic }}</span>
+                </td>
+                <td class="py-3 px-4 font-mono text-slate-300">{{ l.recipient }}</td>
+                <td class="py-3 px-4 text-slate-300 max-w-xs truncate">
+                  <span *ngIf="l.attachmentsCount" class="text-indigo-400 font-bold mr-1">📎{{ l.attachmentsCount }}</span>
+                  {{ l.body }}
+                </td>
+                <td class="py-3 px-4">
+                  <span
+                    class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase"
+                    [ngClass]="l.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                  >
+                    {{ l.status }}
+                  </span>
+                </td>
+                <td class="py-3 px-4 text-slate-400">{{ l.latencyMs }}ms</td>
+                <td class="py-3 px-4 text-slate-400">{{ l.clientApp }}</td>
+              </tr>
+              <tr *ngIf="logs.length === 0">
+                <td colspan="7" class="py-12 text-center text-slate-500">Belum ada riwayat pengiriman notifikasi.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <!-- ─── TAB 3: TEMPLATES ─── -->
-    <div *ngIf="activeTab === 'templates'" class="space-y-6">
+    <!-- ─── TAB 3: SMART ROUTING ─── -->
+    <div *ngIf="activeTab === 'routing'" class="space-y-6">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-base font-bold text-white">📝 Pengelola Template Notifikasi</h2>
-          <p class="text-xs text-slate-400">Template dengan placeholder variabel dinamis seperti <code class="text-indigo-400">&#123;&zwj;&#123;name&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;otp&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;amount&#125;&zwj;&#125;</code>.</p>
+          <h2 class="text-base font-bold text-white">🔀 Topic-Based Smart Routing</h2>
+          <p class="text-xs text-slate-400">Arahkan notifikasi berdasarkan kategori (e.g. <code class="text-indigo-400">security</code>, <code class="text-indigo-400">billing</code>, <code class="text-indigo-400">system-alert</code>) ke saluran dan penerima otomatis tanpa mengubah kode aplikasi klien.</p>
         </div>
+        <button (click)="openNewRouteModal()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+          + Buat Topic Route
+        </button>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div *ngFor="let t of templates" class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl flex flex-col justify-between space-y-4">
+        <div *ngFor="let r of routes" class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl flex flex-col justify-between space-y-4">
           <div>
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-lg">{{ t.slug }}</span>
-              <div class="flex gap-1">
-                <span *ngFor="let ch of t.channels" class="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">{{ ch }}</span>
-              </div>
+              <span class="text-xs font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-lg">#{{ r.topic }}</span>
+              <button
+                (click)="toggleRouteStatus(r)"
+                class="px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors"
+                [ngClass]="r.enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'"
+              >
+                {{ r.enabled ? 'Aktif' : 'Nonaktif' }}
+              </button>
             </div>
-            <h3 class="text-sm font-bold text-white">{{ t.name }}</h3>
-            <p *ngIf="t.titleTemplate" class="text-xs text-indigo-300 mt-1 font-semibold">{{ t.titleTemplate }}</p>
-            <pre class="mt-3 p-3 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] font-mono text-slate-300 whitespace-pre-wrap">{{ t.bodyTemplate }}</pre>
+            <h3 class="text-sm font-bold text-white">{{ r.name }}</h3>
+            <p class="text-xs text-slate-400 mt-1">{{ r.description || 'Tidak ada deskripsi' }}</p>
+
+            <div class="mt-3 flex flex-wrap gap-1">
+              <span *ngFor="let ch of r.channels" class="text-[10px] uppercase font-bold text-slate-300 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">
+                {{ ch }}
+              </span>
+            </div>
           </div>
-          <button (click)="sandboxForm.templateSlug = t.slug; activeTab = 'sandbox'" class="w-full py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-bold transition-all">
-            Uji Coba di Sandbox →
-          </button>
+
+          <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+            <button (click)="applyTopic(r); activeTab = 'sandbox'" class="text-xs text-indigo-400 hover:text-indigo-300 font-bold">
+              Uji di Sandbox →
+            </button>
+            <div class="flex items-center gap-2">
+              <button (click)="editRoute(r)" class="text-xs text-slate-400 hover:text-white">Edit</button>
+              <button (click)="deleteRoute(r.id)" class="text-xs text-rose-400 hover:text-rose-300">Hapus</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- ─── TAB 4: CHANNELS CONFIG ─── -->
+    <!-- ─── TAB 4: CHANNELS CONFIG & LIVE HEALTH ─── -->
     <div *ngIf="activeTab === 'channels'" class="max-w-4xl mx-auto space-y-6">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-base font-bold text-white">⚙️ Konfigurasi Saluran & Provider</h2>
-          <p class="text-xs text-slate-400">Atur kredensial WABridge, SMTP Nodemailer, Telegram Bot, dan Webhook Discord.</p>
+          <h2 class="text-base font-bold text-white">⚙️ Konfigurasi Saluran & Live Health Checker</h2>
+          <p class="text-xs text-slate-400">Pantau ketersediaan gateway, status ping, dan konfigurasi kredensial provider.</p>
         </div>
-        <button (click)="saveSettings()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20">
-          Simpan Konfigurasi
-        </button>
+        <div class="flex gap-2">
+          <button (click)="checkAllHealth()" [disabled]="isCheckingAllHealth" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5">
+            <span *ngIf="isCheckingAllHealth" class="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin"></span>
+            <span>{{ isCheckingAllHealth ? 'Memeriksa...' : '🔄 Ping Semua Saluran' }}</span>
+          </button>
+          <button (click)="saveSettings()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+            Simpan Konfigurasi
+          </button>
+        </div>
       </div>
 
       <!-- WhatsApp WABridge -->
@@ -381,11 +618,26 @@
           <div class="flex items-center gap-3">
             <span class="text-2xl">📱</span>
             <div>
-              <h3 class="text-sm font-bold text-white">WhatsApp Gateway (via WABridge)</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white">WhatsApp Gateway (via WABridge)</h3>
+                <!-- Health Badge -->
+                <span
+                  *ngIf="channelHealth['whatsapp']"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  [ngClass]="channelHealth['whatsapp'].online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                >
+                  {{ channelHealth['whatsapp'].online ? '🟢 Online (' + channelHealth['whatsapp'].latencyMs + 'ms)' : '🔴 ' + channelHealth['whatsapp'].message }}
+                </span>
+              </div>
               <p class="text-xs text-slate-400">Terhubung ke project WABridge lokal atau server VPS.</p>
             </div>
           </div>
-          <input type="checkbox" [(ngModel)]="settings.whatsapp.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          <div class="flex items-center gap-3">
+            <button (click)="testSingleChannel('whatsapp')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-[11px] text-slate-300 hover:text-white">
+              Ping Test
+            </button>
+            <input type="checkbox" [(ngModel)]="settings.whatsapp.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -405,11 +657,25 @@
           <div class="flex items-center gap-3">
             <span class="text-2xl">✉️</span>
             <div>
-              <h3 class="text-sm font-bold text-white">Email SMTP (Nodemailer)</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white">Email SMTP (Nodemailer)</h3>
+                <span
+                  *ngIf="channelHealth['email']"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  [ngClass]="channelHealth['email'].online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                >
+                  {{ channelHealth['email'].online ? '🟢 Handshake OK (' + channelHealth['email'].latencyMs + 'ms)' : '🔴 ' + channelHealth['email'].message }}
+                </span>
+              </div>
               <p class="text-xs text-slate-400">Dukungan Gmail, Resend, Brevo, atau Mailgun.</p>
             </div>
           </div>
-          <input type="checkbox" [(ngModel)]="settings.email.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          <div class="flex items-center gap-3">
+            <button (click)="testSingleChannel('email')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-[11px] text-slate-300 hover:text-white">
+              Ping Test
+            </button>
+            <input type="checkbox" [(ngModel)]="settings.email.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
@@ -441,11 +707,25 @@
           <div class="flex items-center gap-3">
             <span class="text-2xl">🤖</span>
             <div>
-              <h3 class="text-sm font-bold text-white">Telegram Bot API</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white">Telegram Bot API</h3>
+                <span
+                  *ngIf="channelHealth['telegram']"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  [ngClass]="channelHealth['telegram'].online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                >
+                  {{ channelHealth['telegram'].online ? '🟢 ' + channelHealth['telegram'].message + ' (' + channelHealth['telegram'].latencyMs + 'ms)' : '🔴 ' + channelHealth['telegram'].message }}
+                </span>
+              </div>
               <p class="text-xs text-slate-400">Kirim alert langsung ke grup atau chat pribadi.</p>
             </div>
           </div>
-          <input type="checkbox" [(ngModel)]="settings.telegram.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          <div class="flex items-center gap-3">
+            <button (click)="testSingleChannel('telegram')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-[11px] text-slate-300 hover:text-white">
+              Ping Test
+            </button>
+            <input type="checkbox" [(ngModel)]="settings.telegram.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -465,11 +745,25 @@
           <div class="flex items-center gap-3">
             <span class="text-2xl">👾</span>
             <div>
-              <h3 class="text-sm font-bold text-white">Discord Webhooks</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white">Discord Webhooks</h3>
+                <span
+                  *ngIf="channelHealth['discord']"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  [ngClass]="channelHealth['discord'].online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'"
+                >
+                  {{ channelHealth['discord'].online ? '🟢 Terhubung (' + channelHealth['discord'].latencyMs + 'ms)' : '🔴 ' + channelHealth['discord'].message }}
+                </span>
+              </div>
               <p class="text-xs text-slate-400">Kirim Rich Embed notifikasi ke channel Discord server Anda.</p>
             </div>
           </div>
-          <input type="checkbox" [(ngModel)]="settings.discord.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          <div class="flex items-center gap-3">
+            <button (click)="testSingleChannel('discord')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-[11px] text-slate-300 hover:text-white">
+              Ping Test
+            </button>
+            <input type="checkbox" [(ngModel)]="settings.discord.enabled" class="w-4 h-4 text-indigo-600 rounded" />
+          </div>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-400 mb-1">Discord Webhook URL</label>
@@ -478,7 +772,36 @@
       </div>
     </div>
 
-    <!-- ─── TAB 5: API KEYS ─── -->
+    <!-- ─── TAB 5: TEMPLATES ─── -->
+    <div *ngIf="activeTab === 'templates'" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-white">📝 Pengelola Template Notifikasi</h2>
+          <p class="text-xs text-slate-400">Template dengan placeholder variabel dinamis seperti <code class="text-indigo-400">&#123;&zwj;&#123;name&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;otp&#125;&zwj;&#125;</code>, <code class="text-indigo-400">&#123;&zwj;&#123;amount&#125;&zwj;&#125;</code>.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div *ngFor="let t of templates" class="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl flex flex-col justify-between space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-lg">{{ t.slug }}</span>
+              <div class="flex gap-1">
+                <span *ngFor="let ch of t.channels" class="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">{{ ch }}</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-bold text-white">{{ t.name }}</h3>
+            <p *ngIf="t.titleTemplate" class="text-xs text-indigo-300 mt-1 font-semibold">{{ t.titleTemplate }}</p>
+            <pre class="mt-3 p-3 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] font-mono text-slate-300 whitespace-pre-wrap">{{ t.bodyTemplate }}</pre>
+          </div>
+          <button (click)="sandboxForm.templateSlug = t.slug; activeTab = 'sandbox'" class="w-full py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-bold transition-all">
+            Uji Coba di Sandbox →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── TAB 6: API KEYS ─── -->
     <div *ngIf="activeTab === 'keys'" class="space-y-6">
       <div class="flex items-center justify-between">
         <div>
@@ -507,6 +830,53 @@
       </div>
     </div>
   </main>
+
+  <!-- Create / Edit Topic Route Modal -->
+  <div *ngIf="showRouteModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" (click)="showRouteModal = false"></div>
+    <div class="relative bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl z-10 space-y-4">
+      <h3 class="text-base font-bold text-white">{{ editingRoute.id ? 'Edit Topic Route' : 'Buat Topic Route Baru' }}</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Topic Identifier (Slug)</label>
+          <input type="text" [(ngModel)]="editingRoute.topic" placeholder="e.g. security, billing, server-alert" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Nama Rute</label>
+          <input type="text" [(ngModel)]="editingRoute.name" placeholder="e.g. Security & Incident Alerts" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Deskripsi</label>
+          <input type="text" [(ngModel)]="editingRoute.description" placeholder="Penjelasan kegunaan topic..." class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-2">Saluran Tujuan</label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              *ngFor="let ch of availableChannels"
+              type="button"
+              (click)="toggleRouteChannel(ch)"
+              class="px-3 py-1 rounded-xl text-xs font-bold border transition-all"
+              [ngClass]="editingRoute.channels.includes(ch) ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-slate-800 text-slate-400 border-slate-700'"
+            >
+              {{ ch }}
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">
+            Default Recipients (Opsional)
+            <span class="text-[10px] text-slate-500 font-normal">Format: telegram:-100123, email:ops&#64;domain.com</span>
+          </label>
+          <input type="text" [(ngModel)]="editingRoute.defaultRecipientText" placeholder="telegram:-1001234, email:admin&#64;example.com" class="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2">
+        <button (click)="showRouteModal = false" class="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold">Batal</button>
+        <button (click)="saveRoute()" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">Simpan Route</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Create API Key Modal -->
   <div *ngIf="showKeyModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">

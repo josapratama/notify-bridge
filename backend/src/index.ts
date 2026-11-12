@@ -10,17 +10,18 @@ import {
 } from "./config.js";
 import { db } from "./db.js";
 import { dispatcher } from "./dispatcher.js";
+import { queueRunner } from "./queue.js";
 import {
   authenticate,
   requireAdminOrApiKey,
   exchangeOAuthCode,
 } from "./auth.js";
-import type { ChannelType } from "./types.js";
+import type { ChannelType, AttachmentItem } from "./types.js";
 
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "15mb" }));
 app.use(authenticate);
 
 // Dynamically resolve built Angular frontend path
@@ -51,8 +52,18 @@ app.get("/api/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "NotifyBridge Multi-Channel Notification Hub",
-    version: "1.0.0",
+    version: "2.0.0",
     authHubUrl: AUTHHUB_URL,
+    features: [
+      "smart-queue",
+      "retry-backoff",
+      "topic-routing",
+      "media-attachments",
+      "scheduled-delivery",
+      "health-checker",
+      "delivery-webhooks",
+      "analytics-engine",
+    ],
     timestamp: new Date().toISOString(),
   });
 });
@@ -106,7 +117,7 @@ app.get("/api/auth/me", (req: Request, res: Response) => {
   });
 });
 
-// ─── 🚀 Universal Send API ───────────────────────────────────
+// ─── 🚀 Universal Send API (v2) ──────────────────────────────
 app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Response) => {
   const {
     channel,
@@ -118,12 +129,41 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     template,
     data = {},
     fallbackChannels = [],
+    topic,
+    attachments = [],
+    sendAt,
+    delaySeconds,
+    queue: forceQueue = false,
+    callbackUrl,
   } = req.body;
 
   let finalTitle = title || "";
   let finalMessage = message || "";
+  let targetChannels: ChannelType[] = channels || (channel ? [channel] : []);
+  let targetRecipients: string[] = recipients || (recipient ? [recipient] : []);
 
-  // 1. Process Template if specified
+  // 1. Topic-Based Smart Routing
+  if (topic) {
+    const route = db.getRouteByTopic(topic);
+    if (route) {
+      if (targetChannels.length === 0) {
+        targetChannels = [...route.channels];
+      }
+      if (targetRecipients.length === 0 && route.defaultRecipients) {
+        for (const ch of targetChannels) {
+          const defRec = route.defaultRecipients[ch];
+          if (defRec) targetRecipients.push(defRec);
+        }
+      }
+    }
+  }
+
+  // Fallback to default channel if none specified
+  if (targetChannels.length === 0) {
+    targetChannels = ["whatsapp"];
+  }
+
+  // 2. Process Template if specified
   if (template) {
     const tpl = db.getTemplateBySlug(template);
     if (!tpl) {
@@ -144,15 +184,55 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     return res.status(400).json({ error: "Konten 'message' atau 'template' wajib disertakan." });
   }
 
-  const targetChannels: ChannelType[] = channels || (channel ? [channel] : ["whatsapp"]);
-  const targetRecipients: string[] = recipients || (recipient ? [recipient] : []);
-
   if (targetRecipients.length === 0) {
     return res.status(400).json({ error: "Tujuan penerima ('recipient' atau 'recipients') wajib disertakan." });
   }
 
-  const results = [];
   const clientIdentifier = req.apiKeyClient || req.user?.username || "API Client";
+
+  // 3. Scheduled / Delayed / Queued Processing
+  const isScheduled =
+    forceQueue ||
+    !!sendAt ||
+    (typeof delaySeconds === "number" && delaySeconds > 0);
+
+  if (isScheduled) {
+    const queuedItems = [];
+    for (const ch of targetChannels) {
+      for (const r of targetRecipients) {
+        const item = queueRunner.enqueueItem({
+          channel: ch,
+          recipient: r,
+          title: finalTitle,
+          message: finalMessage,
+          attachments: attachments as AttachmentItem[],
+          clientApp: clientIdentifier,
+          topic,
+          callbackUrl,
+          sendAt,
+          delaySeconds,
+        });
+        queuedItems.push(item);
+      }
+    }
+
+    return res.status(202).json({
+      success: true,
+      queued: true,
+      queuedCount: queuedItems.length,
+      items: queuedItems.map((q) => ({
+        id: q.id,
+        channel: q.channel,
+        recipient: q.recipient,
+        scheduledFor: new Date(q.scheduledFor).toISOString(),
+        status: q.status,
+      })),
+      note: "Notifikasi berhasil masuk ke antrean dan akan dikirim secara asynchronous.",
+    });
+  }
+
+  // 4. Synchronous Direct Dispatch
+  const results = [];
 
   for (const ch of targetChannels) {
     for (const r of targetRecipients) {
@@ -161,7 +241,9 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
         recipient: r,
         title: finalTitle,
         message: finalMessage,
+        attachments: attachments as AttachmentItem[],
         clientApp: clientIdentifier,
+        topic,
       });
 
       // If failed and fallback channels are set, attempt cascade fallback!
@@ -172,13 +254,35 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
             recipient: r,
             title: `[Fallback] ${finalTitle}`,
             message: finalMessage,
+            attachments: attachments as AttachmentItem[],
             clientApp: `${clientIdentifier} (Fallback from ${ch})`,
+            topic,
           });
           if (fbRes.success) {
             dispatchRes = fbRes;
             break;
           }
         }
+      }
+
+      // Fire callback if immediate dispatch requested callback
+      if (callbackUrl && callbackUrl.startsWith("http")) {
+        try {
+          fetch(callbackUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              event: "notification.status",
+              status: dispatchRes.success ? "delivered" : "failed",
+              channel: ch,
+              recipient: r,
+              topic,
+              latencyMs: dispatchRes.latencyMs,
+              error: dispatchRes.error || null,
+              timestamp: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        } catch {}
       }
 
       results.push(dispatchRes);
@@ -192,6 +296,55 @@ app.post("/api/v1/send", requireAdminOrApiKey, async (req: Request, res: Respons
     totalCount: results.length,
     results,
   });
+});
+
+// ─── Live Channel Health Checker ─────────────────────────────
+app.get("/api/channels/health", async (_req: Request, res: Response) => {
+  const statuses = await dispatcher.testAllChannels();
+  res.json({ statuses });
+});
+
+app.post("/api/channels/:channel/test", requireAdminOrApiKey, async (req: Request, res: Response) => {
+  const channel = req.params.channel as ChannelType;
+  const status = await dispatcher.testChannel(channel);
+  res.json(status);
+});
+
+// ─── Topic-Based Routing API ─────────────────────────────────
+app.get("/api/routes", (_req: Request, res: Response) => {
+  res.json({ routes: db.getRoutes() });
+});
+
+app.post("/api/routes", requireAdminOrApiKey, (req: Request, res: Response) => {
+  const { topic, name, channels } = req.body;
+  if (!topic || !name || !channels || !channels.length) {
+    return res.status(400).json({ error: "topic, name, dan minimal 1 channel wajib diisi" });
+  }
+  const route = db.saveRoute(req.body);
+  res.json({ success: true, route });
+});
+
+app.delete("/api/routes/:id", requireAdminOrApiKey, (req: Request, res: Response) => {
+  const deleted = db.deleteRoute(String(req.params.id));
+  if (!deleted) return res.status(404).json({ error: "Topic route tidak ditemukan" });
+  res.json({ success: true });
+});
+
+// ─── Analytics & Metrics API ─────────────────────────────────
+app.get("/api/analytics", (_req: Request, res: Response) => {
+  const analytics = db.getAnalytics();
+  res.json(analytics);
+});
+
+// ─── Queue Manager API ───────────────────────────────────────
+app.get("/api/queue", requireAdminOrApiKey, (_req: Request, res: Response) => {
+  res.json({ queue: db.getQueue() });
+});
+
+app.delete("/api/queue/:id", requireAdminOrApiKey, (req: Request, res: Response) => {
+  const deleted = db.deleteQueueItem(String(req.params.id));
+  if (!deleted) return res.status(404).json({ error: "Item antrean tidak ditemukan" });
+  res.json({ success: true });
 });
 
 // ─── Settings & Channel Config ───────────────────────────────
@@ -266,4 +419,6 @@ if (fs.existsSync(FRONTEND_DIST)) {
 app.listen(PORT, () => {
   console.log(`🚀 [NotifyBridge] Hub running on http://localhost:${PORT}`);
   console.log(`🔐 [AuthHub] Protected with SSO (AuthHub URL: ${AUTHHUB_URL})`);
+  // Start background queue & scheduler
+  queueRunner.start();
 });
